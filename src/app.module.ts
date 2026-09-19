@@ -1,7 +1,8 @@
 import { Module, ValidationPipe } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
-import { APP_FILTER, APP_GUARD, APP_PIPE } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_PIPE, APP_INTERCEPTOR } from '@nestjs/core';
 import { LoggerModule } from 'nestjs-pino';
+import { IdempotencyInterceptor } from './idempotency/idempotency.interceptor';
 
 import { envValidationSchema } from './common/config/env.validation';
 import { pinoLoggerConfig } from './common/logger/logger.config';
@@ -81,6 +82,9 @@ import { IdempotencyModule } from './idempotency/idempotency.module';
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: RateLimitGuard },
+
+    // ── Global interceptor (Idempotency) ──
+    { provide: APP_INTERCEPTOR, useClass: IdempotencyInterceptor },
   ],
 })
 export class AppModule {}

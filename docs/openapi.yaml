@@ -4,24 +4,21 @@ paths:
     get:
       operationId: HealthController_healthz
       summary: Liveness probe
-      description: Liveness probe — is the process alive?
       parameters: []
       responses:
         "200":
           description: ""
-      tags:
+      tags: &a1
         - Health
   /readyz:
     get:
       operationId: HealthController_readyz
       summary: Readiness probe
-      description: Readiness probe — can the service handle requests?
       parameters: []
       responses:
         "200":
           description: ""
-      tags:
-        - Health
+      tags: *a1
   /auth/register:
     post:
       operationId: AuthController_register
@@ -36,7 +33,7 @@ paths:
       responses:
         "201":
           description: ""
-      tags:
+      tags: &a2
         - Auth
   /auth/login:
     post:
@@ -52,12 +49,7 @@ paths:
       responses:
         "200":
           description: ""
-          content:
-            application/json:
-              schema:
-                type: object
-      tags:
-        - Auth
+      tags: *a2
   /auth/mfa/verify:
     post:
       operationId: AuthController_verifyMfa
@@ -72,8 +64,7 @@ paths:
       responses:
         "200":
           description: ""
-      tags:
-        - Auth
+      tags: *a2
   /auth/mfa/setup:
     post:
       operationId: AuthController_setupMfa
@@ -82,8 +73,7 @@ paths:
       responses:
         "201":
           description: ""
-      tags:
-        - Auth
+      tags: *a2
       security:
         - access-token: []
   /auth/mfa/setup/confirm:
@@ -94,8 +84,7 @@ paths:
       responses:
         "201":
           description: ""
-      tags:
-        - Auth
+      tags: *a2
       security:
         - access-token: []
   /auth/refresh:
@@ -112,8 +101,7 @@ paths:
       responses:
         "200":
           description: ""
-      tags:
-        - Auth
+      tags: *a2
   /auth/logout:
     post:
       operationId: AuthController_logout
@@ -128,8 +116,7 @@ paths:
       responses:
         "200":
           description: ""
-      tags:
-        - Auth
+      tags: *a2
       security:
         - access-token: []
   /users/me:
@@ -140,9 +127,9 @@ paths:
       responses:
         "200":
           description: ""
-      tags:
+      tags: &a3
         - Users
-      security:
+      security: &a4
         - access-token: []
     patch:
       operationId: UsersController_updateMe
@@ -151,10 +138,8 @@ paths:
       responses:
         "200":
           description: ""
-      tags:
-        - Users
-      security:
-        - access-token: []
+      tags: *a3
+      security: *a4
   /users/{id}:
     get:
       operationId: UsersController_getUser
@@ -168,10 +153,8 @@ paths:
       responses:
         "200":
           description: ""
-      tags:
-        - Users
-      security:
-        - access-token: []
+      tags: *a3
+      security: *a4
   /users:
     get:
       operationId: UsersController_listUsers
@@ -190,10 +173,148 @@ paths:
       responses:
         "200":
           description: ""
-      tags:
-        - Users
+      tags: *a3
+      security: *a4
+  /availability/slots:
+    post:
+      operationId: AvailabilityController_createSlot
+      summary: Create a single discrete availability slot (Doctor only)
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSlotDto"
+      responses:
+        "201":
+          description: ""
+      tags: &a5
+        - Availability
       security:
         - access-token: []
+  /availability/slots/bulk:
+    post:
+      operationId: AvailabilityController_bulkCreateSlots
+      summary: Bulk generate availability slots from weekly schedule (Doctor only)
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkCreateSlotsDto"
+      responses:
+        "201":
+          description: ""
+      tags: *a5
+      security:
+        - access-token: []
+  /availability/slots/{id}:
+    delete:
+      operationId: AvailabilityController_cancelSlot
+      summary: Cancel an unbooked availability slot (Doctor only)
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ""
+      tags: *a5
+      security:
+        - access-token: []
+  /availability/doctors/{doctorId}/slots:
+    get:
+      operationId: AvailabilityController_getDoctorSlots
+      summary: Get doctor availability slots (Public/Patient)
+      parameters:
+        - name: doctorId
+          required: true
+          in: path
+          schema:
+            type: string
+        - name: startDate
+          required: false
+          in: query
+          description: Filter slots starting at or after this time
+          schema:
+            type: string
+        - name: endDate
+          required: false
+          in: query
+          description: Filter slots starting before or at this time
+          schema:
+            type: string
+        - name: status
+          required: false
+          in: query
+          description: Filter by slot status
+          schema:
+            enum:
+              - AVAILABLE
+              - HELD
+              - RESERVED
+              - BOOKED
+              - COMPLETED
+              - CANCELLED
+              - BLOCKED
+            type: string
+      responses:
+        "200":
+          description: ""
+      tags: *a5
+  /consultations:
+    post:
+      operationId: ConsultationsController_bookConsultation
+      summary: Book a consultation slot (Patient only, atomic conditional hold +
+        outbox event)
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          description: Unique idempotency key for state-changing request
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BookConsultationDto"
+      responses:
+        "201":
+          description: ""
+      tags: &a6
+        - Consultations
+      security: &a7
+        - access-token: []
+    get:
+      operationId: ConsultationsController_listConsultations
+      summary: List consultations for current patient
+      parameters: []
+      responses:
+        "200":
+          description: ""
+      tags: *a6
+      security: *a7
+  /consultations/{id}:
+    get:
+      operationId: ConsultationsController_getConsultation
+      summary: Get consultation details (RBAC & ownership checked)
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ""
+      tags: *a6
+      security: *a7
 info:
   title: Amrutam Telemedicine API
   description: Production-grade telemedicine backend
@@ -216,15 +337,13 @@ components:
           example: patient@example.com
         password:
           type: string
-          minLength: 8
           example: SecureP@ss123!
+          minLength: 8
         firstName:
           type: string
-          minLength: 1
           example: Jane
         lastName:
           type: string
-          minLength: 1
           example: Doe
         role:
           type: string
@@ -274,8 +393,6 @@ components:
           description: Short-lived MFA token from login step 1
         totpCode:
           type: string
-          minLength: 6
-          maxLength: 6
           description: 6-digit TOTP code
         recoveryCode:
           type: string
@@ -289,3 +406,88 @@ components:
           type: string
       required:
         - refreshToken
+    CreateSlotDto:
+      type: object
+      properties:
+        startTime:
+          type: string
+          example: 2026-10-01T09:00:00.000Z
+          description: Slot start time in UTC ISO 8601 format
+        durationMinutes:
+          type: number
+          example: 30
+          description: Slot duration in minutes (between 10 and 120)
+          default: 30
+      required:
+        - startTime
+        - durationMinutes
+    WeeklyScheduleItemDto:
+      type: object
+      properties:
+        dayOfWeek:
+          type: number
+          example: 1
+          description: "Day of week: 0=Sun, 1=Mon, ..., 6=Sat"
+        startHour:
+          type: number
+          example: 9
+          description: Start hour (0-23)
+        startMinute:
+          type: number
+          example: 0
+          description: Start minute (0-59)
+        endHour:
+          type: number
+          example: 17
+          description: End hour (0-23)
+        endMinute:
+          type: number
+          example: 0
+          description: End minute (0-59)
+        slotDurationMinutes:
+          type: number
+          example: 30
+          description: Slot duration in minutes
+      required:
+        - dayOfWeek
+        - startHour
+        - startMinute
+        - endHour
+        - endMinute
+        - slotDurationMinutes
+    BulkCreateSlotsDto:
+      type: object
+      properties:
+        startDate:
+          type: string
+          example: 2026-10-01
+          description: Start date (YYYY-MM-DD)
+        endDate:
+          type: string
+          example: 2026-10-07
+          description: End date (YYYY-MM-DD)
+        schedule:
+          type: array
+          items:
+            $ref: "#/components/schemas/WeeklyScheduleItemDto"
+        timezone:
+          type: string
+          example: Asia/Kolkata
+          description: Timezone for schedule generation; defaults to doctor profile timezone
+      required:
+        - startDate
+        - endDate
+        - schedule
+    BookConsultationDto:
+      type: object
+      properties:
+        slotId:
+          type: string
+          example: a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11
+          description: The UUID of the availability slot to book
+        reason:
+          type: string
+          example: Persistent headache and fatigue for 3 days
+          description: Reason for consultation or chief symptoms
+      required:
+        - slotId

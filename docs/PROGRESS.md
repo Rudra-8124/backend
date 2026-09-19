@@ -1,7 +1,7 @@
 # Progress
 Phase 0 plan/design ........ [x] ← completed 2026-09-19
 Phase 1 foundation/auth ..... [x] ← completed 2026-09-19
-Phase 2 booking ............. [ ]
+Phase 2 booking ............. [x] ← completed 2026-09-19
 Phase 3 consult/pay/saga .... [ ]
 Phase 4 search/cache/admin .. [ ]
 Phase 5 observability ....... [ ]
@@ -57,17 +57,69 @@ Phase 8 final audit ......... [ ]
 - [x] 10 unit tests for `EncryptionService`
 - [x] 27 end-to-end integration tests on real PostgreSQL & Redis
 
+## Phase 2 — Done
+- [x] Availability & Booking Migration (`1700000000002-AvailabilityBooking.ts`):
+  - Added `timezone` to `profiles` (default `UTC`, validated against IANA timezones)
+  - Added `hold_expires_at` to `availability_slots` with B-tree index for efficient worker polling
+  - Added `endpoint`, `status` (`IN_PROGRESS`, `COMPLETED`), `updated_at` to `idempotency_keys`
+  - Created unique index `idx_idempotency_keys_user_endpoint_key` on `(user_id, endpoint, idempotency_key)`
+- [x] Idempotency Interceptor & Service:
+  - Atomic key reservation with `INSERT ... ON CONFLICT DO NOTHING`
+  - SHA-256 body hashing for payload verification
+  - Status management: `IN_PROGRESS` claimed atomically, updated to `COMPLETED` on handler return
+  - Replay returns cached status and response with `Idempotency-Replay: true` header
+  - Same key with different body returns HTTP 422 Unprocessable Entity
+  - Concurrent duplicate with status `IN_PROGRESS` returns HTTP 409 Conflict with `Retry-After: 2` header
+  - Crash recovery: detects and recovers stale locks older than 60 seconds
+  - Expiration: keys older than 24 hours expire
+- [x] Doctor Availability Management:
+  - Discrete fixed-size slots stored as UTC `timestamptz`, with doctor timezone in `profiles.timezone`
+  - Bulk generation from weekly schedule (`recurring_days`, `start_time`, `end_time`, `slot_duration_minutes`, date range) in doctor's local timezone
+  - Slot cancellation: doctors can cancel unbooked slots; patients or cross-doctors denied
+  - Slot overlap prevention: composite unique constraint `(doctor_id, start_time, partition_month)` plus service-level overlap verification wrapped in a per-doctor transaction advisory lock (`pg_advisory_xact_lock`)
+- [x] Atomic Booking & Concurrency Control:
+  - `POST /consultations` with mandatory `Idempotency-Key` header
+  - Single-transaction atomic conditional `UPDATE` query:
+    ```sql
+    UPDATE availability_slots
+    SET status = 'HELD', held_by = $1, held_until = now() + interval '5 minutes',
+        hold_expires_at = now() + interval '5 minutes', updated_at = now()
+    WHERE id = $2 AND (status = 'AVAILABLE' OR (status = 'HELD' AND (hold_expires_at < now() OR held_until < now())))
+    RETURNING id, partition_month, doctor_id, start_time, end_time, status, held_by, hold_expires_at;
+    ```
+  - Exactly 0 rows affected -> immediate HTTP 409 Conflict (zero read-then-write race)
+  - Patient overlapping slots prevention: checks patient has no active holds or bookings overlapping the target slot
+  - Atomic consultation insert with status `PENDING_PAYMENT` and transactional `outbox_events` (`consultation.created`) in the same database transaction
+- [x] Hold Expiry Worker:
+  - Worker process (`src/worker.ts`) and `AvailabilityService.releaseExpiredHolds()`
+  - Queries slots where `status = 'HELD'` and `hold_expires_at < now()`
+  - Atomically resets slot to `AVAILABLE` and marks consultation as `CANCELLED` with reason `HOLD_EXPIRED`
+- [x] Ownership Checks & IDOR Protection:
+  - Patient can view own consultation; cross-patient denied with 403 Forbidden
+  - Assigned doctor can view consultation; unassigned doctor denied with 403 Forbidden
+  - Doctor cannot book consultations (`@Roles('patient')`); patient cannot create or cancel slots (`@Roles('doctor')`)
+- [x] Full Verification Suite:
+  - 20 E2E booking tests covering 50 parallel bookings, 20 same-key replays, 422 mismatch, hold expiry lifecycle, patient overlap prevention, RBAC & IDOR
+  - 27 E2E auth tests passing
+  - 10 unit tests for EncryptionService passing
+  - OpenAPI spec refreshed to `docs/openapi.yaml`
+
 ## Verified
 - `npm run typecheck`: 0 errors
-- `npm run lint`: 0 errors
+- `npm run lint`: 0 errors (6 warnings for intentional `any` in seed/test)
 - `npm test`: 10 passed, 10 total
-- `npm run test:e2e`: 27 passed, 27 total against real PostgreSQL & Redis
-- `npm run build`: cleanly compiles production bundle
-- Seed script idempotency verified (running twice skips existing admin)
-- OpenAPI spec exported to `docs/openapi.yaml`
+- `npx jest test/auth.e2e-spec.ts`: 27 passed, 27 total
+- `npx jest test/booking.e2e-spec.ts`: 20 passed, 20 total
+  - Concurrency: 50 parallel bookings on one slot -> exactly 1x201 Created, 49x409 Conflict, exactly 1 consultation row created
+  - Idempotency: 20 parallel requests with same key and body -> exactly 1 consultation created, identical response
+  - Mismatch: same key with different body -> 422 Unprocessable Entity
+  - Hold expiry: unexpired hold blocked, expired hold re-bookable, worker releases hold and cancels consultation
+  - Overlap: patient cannot book two overlapping slots
+  - IDOR: cross-patient and cross-doctor access denied (403)
+- `npm run openapi:export`: OpenAPI spec exported cleanly to `docs/openapi.yaml`
 
 ## Known gaps
-- Phase 2: Availability slots creation, slot hold with TTL, no-double-booking concurrent locking
+- Phase 3: Payment provider mock, payment intent creation, HMAC-signed webhooks, BullMQ outbox processor, saga compensation on payment failure/timeout, prescription encryption.
 
 ## Next
-Phase 2: Availability & Booking Core — slot scheduling, short slot hold with TTL, concurrency control, double-booking prevention.
+Phase 3: Consultations, Payments, Saga & Outbox — payment provider mock with HMAC signatures, BullMQ outbox worker, payment intent creation, saga orchestration with automated compensation (release slot, cancel consultation).

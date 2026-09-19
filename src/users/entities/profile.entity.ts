@@ -42,6 +42,9 @@ export class Profile {
   @Column({ type: 'varchar', length: 10, nullable: true })
   gender!: string | null;
 
+  @Column({ type: 'varchar', length: 50, default: 'UTC' })
+  timezone!: string;
+
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt!: Date;
 

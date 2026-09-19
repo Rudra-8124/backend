@@ -18,6 +18,8 @@ export enum SlotStatus {
 @Entity('availability_slots')
 @Index('idx_slots_doctor_status', ['doctorId', 'status', 'partitionMonth'])
 @Index('idx_slots_start_time', ['startTime', 'partitionMonth'])
+@Index('idx_slots_doctor_time', ['doctorId', 'startTime', 'partitionMonth'], { unique: true })
+@Index('idx_slots_hold_expires', ['holdExpiresAt'])
 export class AvailabilitySlot {
   @PrimaryColumn({ type: 'uuid' })
   id!: string;
@@ -42,6 +44,9 @@ export class AvailabilitySlot {
 
   @Column({ type: 'timestamptz', nullable: true, name: 'held_until' })
   heldUntil!: Date | null;
+
+  @Column({ type: 'timestamptz', nullable: true, name: 'hold_expires_at' })
+  holdExpiresAt!: Date | null;
 
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt!: Date;

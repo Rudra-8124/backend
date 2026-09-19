@@ -42,8 +42,9 @@ export class ProblemDetailsFilter implements ExceptionFilter {
         title = response;
       } else if (typeof response === 'object' && response !== null) {
         const r = response as Record<string, unknown>;
-        title = (r['error'] as string) || exception.message;
-        detail = (r['message'] as string) || undefined;
+        title = (r['title'] as string) || (r['error'] as string) || exception.message;
+        detail =
+          (r['detail'] as string) || (typeof r['message'] === 'string' ? r['message'] : undefined);
         if (Array.isArray(r['message'])) {
           errors = r['message'] as unknown[];
           detail = 'Validation failed';

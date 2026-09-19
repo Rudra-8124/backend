@@ -7,6 +7,8 @@ const config: Config = {
   transform: { '^.+\\.(t|j)s$': 'ts-jest' },
   testEnvironment: 'node',
   testTimeout: 60000,
+  cache: false,
+  cacheDirectory: '<rootDir>/.jest-cache',
   moduleNameMapper: { '^src/(.*)$': '<rootDir>/src/$1' },
 };
 
