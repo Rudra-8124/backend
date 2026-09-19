@@ -2,7 +2,7 @@
 Phase 0 plan/design ........ [x] ← completed 2026-09-19
 Phase 1 foundation/auth ..... [x] ← completed 2026-09-19
 Phase 2 booking ............. [x] ← completed 2026-09-19
-Phase 3 consult/pay/saga .... [ ]
+Phase 3 consult/pay/saga .... [x] ← completed 2026-09-19
 Phase 4 search/cache/admin .. [ ]
 Phase 5 observability ....... [ ]
 Phase 6 CI/infra/load test .. [ ]
@@ -104,22 +104,61 @@ Phase 8 final audit ......... [ ]
   - 10 unit tests for EncryptionService passing
   - OpenAPI spec refreshed to `docs/openapi.yaml`
 
+## Phase 3 — Done
+- [x] Consultation State Machine:
+  - Enforced in ONE centralized place (`src/consultations/consultation-state-machine.ts`)
+  - Optimistic locking via `version` column; illegal transitions and version collisions return HTTP 409 Conflict
+  - Transition endpoints:
+    - `PATCH /consultations/:id/start`: Doctor-only, transitions `CONFIRMED -> IN_PROGRESS`
+    - `PATCH /consultations/:id/complete`: Doctor-only, transitions `IN_PROGRESS -> COMPLETED`, releases slot to `COMPLETED`, field-encrypts clinical notes
+    - `PATCH /consultations/:id/cancel`: Patient or Doctor ownership check; cancels consultation, releases slot to `AVAILABLE`, and triggers automated refund via payment provider if consultation was paid
+    - `PATCH /consultations/:id/no-show`: Doctor-only, transitions `CONFIRMED -> NO_SHOW`, frees or closes slot
+  - Outbox events emitted transactionally on all state transitions
+- [x] Prescriptions with AES-256-GCM Field-Level Encryption & Auditing:
+  - `POST /consultations/:id/prescriptions`: Assigned doctor only, consultation must be `IN_PROGRESS` or `COMPLETED` (409 otherwise)
+  - `medications`, `diagnosis`, and `notes` encrypted at field level via `EncryptionService` before durable DB persistence
+  - Verified ciphertext stored in DB matches format `keyId:iv:tag:ciphertext`
+  - In-memory decryption only for assigned doctor and consultation patient owner
+  - IDOR protection: third-party patients and unrelated doctors receive HTTP 403 Forbidden
+  - Audit trail: every PHI read and write emits structured audit records via `AuditService` with partition-scoped hash chains
+- [x] Payments & Webhooks with Circuit Breaker:
+  - Mock payment provider behind `IPaymentProvider` interface with configurable failure injection
+  - `CircuitBreaker` pattern (states: `CLOSED`, `OPEN`, `HALF_OPEN`) with exponential backoff and full jitter
+  - `POST /webhooks/payments`:
+    - Timing-safe HMAC-SHA256 signature verification (`crypto.timingSafeEqual`)
+    - 5-minute timestamp anti-replay tolerance window (rejects replayed or stale timestamps)
+    - Deduplication against `processed_webhook_events` table (replayed events acknowledged with 200 without duplicate action)
+    - Durable atomic writes to `payments` table before returning 2xx
+    - Out-of-order handling: refund event before payment intent triggers auto-compensation
+- [x] Saga Orchestration & Outbox Relay Worker:
+  - Outbox relay via `SELECT ... FOR UPDATE SKIP LOCKED` ensuring at-least-once delivery with no concurrent contention
+  - Exponential backoff with jitter on transient failures; routes permanently failing events to Dead Letter Queue (`DLQ`) after 3 attempts
+  - Crash recovery (`recoverStuckEvents`): detects events stuck in `PROCESSING` for >30 seconds and releases them back to `PENDING`
+  - Payment timeout compensation (`processPaymentTimeouts`): detects `PENDING_PAYMENT` consultations older than 10 minutes, cancels consultation, and resets slot to `AVAILABLE`
+  - Partition worker: recurring job executing `ensure_partitions(3)` to ensure 3 months of partitions exist ahead of time
+- [x] Complete Verification of All Failure Paths in `docs/booking-sequence.md`:
+  - Failure Path 1: Slot Conflict -> Handled in Phase 2
+  - Failure Path 2: Payment Failure -> Consultation marked `PAYMENT_FAILED`, slot released to `AVAILABLE`
+  - Failure Path 3: Payment Timeout -> Worker detects >10m hold, cancels consultation, releases slot
+  - Failure Path 4: Duplicate Webhook -> Acknowledged idempotently without duplicate balance or state effect
+  - Failure Path 5: Invalid HMAC Signature -> Rejected with 401 Unauthorized
+  - Failure Path 6: Stale / Replayed Webhook Timestamp -> Rejected with 400 Bad Request
+  - Failure Path 7: Circuit Breaker Trips on Outage -> Transitions to `OPEN`, fast-fails downstream requests, recovers on health restoration
+  - Failure Path 8: Worker Crashes Mid-Relay -> Stuck `PROCESSING` event recovered to `PENDING` with no lost effect and zero duplicates
+
 ## Verified
 - `npm run typecheck`: 0 errors
-- `npm run lint`: 0 errors (6 warnings for intentional `any` in seed/test)
-- `npm test`: 10 passed, 10 total
-- `npx jest test/auth.e2e-spec.ts`: 27 passed, 27 total
-- `npx jest test/booking.e2e-spec.ts`: 20 passed, 20 total
-  - Concurrency: 50 parallel bookings on one slot -> exactly 1x201 Created, 49x409 Conflict, exactly 1 consultation row created
-  - Idempotency: 20 parallel requests with same key and body -> exactly 1 consultation created, identical response
-  - Mismatch: same key with different body -> 422 Unprocessable Entity
-  - Hold expiry: unexpired hold blocked, expired hold re-bookable, worker releases hold and cancels consultation
-  - Overlap: patient cannot book two overlapping slots
-  - IDOR: cross-patient and cross-doctor access denied (403)
+- `npm run lint`: 0 errors (14 warnings for intentional `any` in seed/test)
+- `npm test`: 10 passed, 10 total (Crypto unit tests)
+- `npm run test:e2e`: 66 passed, 66 total
+  - `test/auth.e2e-spec.ts`: 27 passed, 27 total
+  - `test/booking.e2e-spec.ts`: 20 passed, 20 total
+  - `test/phase3.e2e-spec.ts`: 19 passed, 19 total
+- Total Test Suite: 76 passed, 76 total (100% passing)
 - `npm run openapi:export`: OpenAPI spec exported cleanly to `docs/openapi.yaml`
 
 ## Known gaps
-- Phase 3: Payment provider mock, payment intent creation, HMAC-signed webhooks, BullMQ outbox processor, saga compensation on payment failure/timeout, prescription encryption.
+- Phase 4: Postgres full-text search (tsvector + GIN) for doctors/specialties, Redis cache-aside with TTL and invalidation, keyset pagination, admin analytics dashboard & metrics aggregation.
 
 ## Next
-Phase 3: Consultations, Payments, Saga & Outbox — payment provider mock with HMAC signatures, BullMQ outbox worker, payment intent creation, saga orchestration with automated compensation (release slot, cancel consultation).
+Phase 4: Search, Cache-Aside, Invalidation & Admin Analytics — doctor full-text search with GIN index and filters, Redis cache-aside caching with TTL and invalidation on doctor profile/availability changes, keyset pagination for high-scale feeds, and admin analytics queries.

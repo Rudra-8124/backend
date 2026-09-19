@@ -6,6 +6,7 @@ export enum ConsultationStatus {
   IN_PROGRESS = 'IN_PROGRESS',
   COMPLETED = 'COMPLETED',
   CANCELLED = 'CANCELLED',
+  NO_SHOW = 'NO_SHOW',
 }
 
 /**
@@ -55,6 +56,12 @@ export class Consultation {
 
   @Column({ type: 'text', nullable: true, name: 'cancellation_reason' })
   cancellationReason!: string | null;
+
+  @Column({ type: 'varchar', length: 255, nullable: true, name: 'payment_intent_id' })
+  paymentIntentId!: string | null;
+
+  @Column({ type: 'int', default: 1 })
+  version!: number;
 
   @CreateDateColumn({ type: 'timestamptz', name: 'created_at' })
   createdAt!: Date;

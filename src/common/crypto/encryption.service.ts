@@ -14,6 +14,10 @@ import { KeyProvider, KEY_PROVIDER } from './key-provider.interface';
 export class EncryptionService {
   constructor(@Inject(KEY_PROVIDER) private readonly keyProvider: KeyProvider) {}
 
+  getCurrentKeyId(): string {
+    return this.keyProvider.getCurrentKeyId();
+  }
+
   /**
    * Encrypt plaintext using the current active key.
    * Returns "keyId:iv:authTag:ciphertext" format.

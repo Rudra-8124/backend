@@ -45,6 +45,10 @@ describe('Auth (e2e)', () => {
     dataSource = app.get(DataSource);
     redis = app.get(REDIS_CLIENT);
 
+    // Clear rate limits before test suite runs
+    const rlKeys = await redis.keys('rl:*');
+    if (rlKeys.length > 0) await redis.del(...rlKeys);
+
     // Ensure migration has been run and seed admin exists
     // Create admin for tests if needed
     const adminExists = await dataSource.query(
@@ -156,6 +160,11 @@ describe('Auth (e2e)', () => {
   // ── Login ─────────────────────────────────────────
 
   describe('POST /auth/login', () => {
+    beforeAll(async () => {
+      const keys = await redis.keys('rl:*');
+      if (keys.length > 0) await redis.del(...keys);
+    });
+
     it('should login a patient and return tokens', async () => {
       const res = await app.inject({
         method: 'POST',

@@ -300,6 +300,102 @@ paths:
           description: ""
       tags: *a6
       security: *a7
+  /consultations/{id}/start:
+    patch:
+      operationId: ConsultationsController_startConsultation
+      summary: Start consultation (CONFIRMED -> IN_PROGRESS, Doctor only)
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          description: Unique idempotency key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ""
+      tags: *a6
+      security: *a7
+  /consultations/{id}/complete:
+    patch:
+      operationId: ConsultationsController_completeConsultation
+      summary: Complete consultation (IN_PROGRESS -> COMPLETED, Doctor only)
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          description: Unique idempotency key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CompleteConsultationDto"
+      responses:
+        "200":
+          description: ""
+      tags: *a6
+      security: *a7
+  /consultations/{id}/cancel:
+    patch:
+      operationId: ConsultationsController_cancelConsultation
+      summary: Cancel consultation (triggers refund if CONFIRMED)
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          description: Unique idempotency key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelConsultationDto"
+      responses:
+        "200":
+          description: ""
+      tags: *a6
+      security: *a7
+  /consultations/{id}/no-show:
+    patch:
+      operationId: ConsultationsController_markNoShow
+      summary: Mark patient as NO_SHOW (CONFIRMED -> NO_SHOW, Doctor or Admin)
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          description: Unique idempotency key
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ""
+      tags: *a6
+      security: *a7
   /consultations/{id}:
     get:
       operationId: ConsultationsController_getConsultation
@@ -315,6 +411,132 @@ paths:
           description: ""
       tags: *a6
       security: *a7
+  /webhooks/payments:
+    post:
+      operationId: PaymentsController_handlePaymentWebhook
+      summary: Process payment provider webhook with HMAC signature verification
+      parameters:
+        - name: x-webhook-signature
+          required: true
+          in: header
+          schema:
+            type: string
+        - name: x-signature
+          required: true
+          in: header
+          schema:
+            type: string
+        - name: x-timestamp
+          required: true
+          in: header
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ""
+      tags: &a8
+        - Payments
+  /webhooks/payment:
+    post:
+      operationId: PaymentsController_handlePaymentWebhookAlias
+      summary: Alias for webhooks/payments
+      parameters:
+        - name: x-webhook-signature
+          required: true
+          in: header
+          schema:
+            type: string
+        - name: x-signature
+          required: true
+          in: header
+          schema:
+            type: string
+        - name: x-timestamp
+          required: true
+          in: header
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ""
+      tags: *a8
+  /payments/{id}:
+    get:
+      operationId: PaymentsController_getPaymentById
+      summary: Get payment details by ID (Patient owner, Doctor assigned, or Admin)
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ""
+      tags: *a8
+      security:
+        - access-token: []
+  /consultations/{id}/prescriptions:
+    post:
+      operationId: PrescriptionsController_createPrescription
+      summary: Issue a prescription (Doctor only, only for IN_PROGRESS/COMPLETED
+        consultations, encrypted with AES-256-GCM, audited)
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+        - name: Idempotency-Key
+          in: header
+          description: Unique idempotency key
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePrescriptionDto"
+      responses:
+        "201":
+          description: ""
+      tags: &a9
+        - Prescriptions
+      security: &a10
+        - access-token: []
+    get:
+      operationId: PrescriptionsController_getConsultationPrescriptions
+      summary: Get prescriptions for a consultation (Assigned doctor, Patient owner,
+        Admin; decrypted in-memory, audited)
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ""
+      tags: *a9
+      security: *a10
+  /prescriptions/{id}:
+    get:
+      operationId: PrescriptionsController_getPrescriptionById
+      summary: Get single prescription by ID (Assigned doctor, Patient owner, Admin;
+        decrypted in-memory, audited)
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ""
+      tags: *a9
+      security: *a10
 info:
   title: Amrutam Telemedicine API
   description: Production-grade telemedicine backend
@@ -491,3 +713,56 @@ components:
           description: Reason for consultation or chief symptoms
       required:
         - slotId
+    CompleteConsultationDto:
+      type: object
+      properties:
+        notes:
+          type: string
+          example: Patient advised rest and follow-up in 1 week
+    CancelConsultationDto:
+      type: object
+      properties:
+        reason:
+          type: string
+          example: Schedule conflict
+      required:
+        - reason
+    MedicationItemDto:
+      type: object
+      properties:
+        name:
+          type: string
+          example: Amoxicillin
+        dosage:
+          type: string
+          example: 500mg
+        frequency:
+          type: string
+          example: TDS
+        duration:
+          type: string
+          example: 5 days
+      required:
+        - name
+        - dosage
+    CreatePrescriptionDto:
+      type: object
+      properties:
+        medications:
+          example:
+            - name: Amoxicillin
+              dosage: 500mg
+              frequency: TDS
+              duration: 5 days
+          type: array
+          items:
+            $ref: "#/components/schemas/MedicationItemDto"
+        diagnosis:
+          type: string
+          example: Viral upper respiratory tract infection
+        notes:
+          type: string
+          example: Drink plenty of warm fluids, rest for 3 days.
+      required:
+        - medications
+        - diagnosis
