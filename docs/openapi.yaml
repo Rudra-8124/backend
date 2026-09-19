@@ -1,0 +1,291 @@
+openapi: 3.0.0
+paths:
+  /healthz:
+    get:
+      operationId: HealthController_healthz
+      summary: Liveness probe
+      description: Liveness probe — is the process alive?
+      parameters: []
+      responses:
+        "200":
+          description: ""
+      tags:
+        - Health
+  /readyz:
+    get:
+      operationId: HealthController_readyz
+      summary: Readiness probe
+      description: Readiness probe — can the service handle requests?
+      parameters: []
+      responses:
+        "200":
+          description: ""
+      tags:
+        - Health
+  /auth/register:
+    post:
+      operationId: AuthController_register
+      summary: Register a new patient or doctor
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterDto"
+      responses:
+        "201":
+          description: ""
+      tags:
+        - Auth
+  /auth/login:
+    post:
+      operationId: AuthController_login
+      summary: Login — returns tokens or MFA challenge
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginDto"
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                type: object
+      tags:
+        - Auth
+  /auth/mfa/verify:
+    post:
+      operationId: AuthController_verifyMfa
+      summary: Complete MFA verification (login step 2)
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MfaVerifyDto"
+      responses:
+        "200":
+          description: ""
+      tags:
+        - Auth
+  /auth/mfa/setup:
+    post:
+      operationId: AuthController_setupMfa
+      summary: Generate TOTP secret and recovery codes
+      parameters: []
+      responses:
+        "201":
+          description: ""
+      tags:
+        - Auth
+      security:
+        - access-token: []
+  /auth/mfa/setup/confirm:
+    post:
+      operationId: AuthController_confirmMfaSetup
+      summary: Confirm MFA setup with a TOTP code
+      parameters: []
+      responses:
+        "201":
+          description: ""
+      tags:
+        - Auth
+      security:
+        - access-token: []
+  /auth/refresh:
+    post:
+      operationId: AuthController_refresh
+      summary: Refresh access token (rotates refresh token)
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenDto"
+      responses:
+        "200":
+          description: ""
+      tags:
+        - Auth
+  /auth/logout:
+    post:
+      operationId: AuthController_logout
+      summary: Logout — revoke refresh token
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenDto"
+      responses:
+        "200":
+          description: ""
+      tags:
+        - Auth
+      security:
+        - access-token: []
+  /users/me:
+    get:
+      operationId: UsersController_getMe
+      summary: Get current user profile
+      parameters: []
+      responses:
+        "200":
+          description: ""
+      tags:
+        - Users
+      security:
+        - access-token: []
+    patch:
+      operationId: UsersController_updateMe
+      summary: Update current user profile
+      parameters: []
+      responses:
+        "200":
+          description: ""
+      tags:
+        - Users
+      security:
+        - access-token: []
+  /users/{id}:
+    get:
+      operationId: UsersController_getUser
+      summary: Get user by ID (admin only)
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ""
+      tags:
+        - Users
+      security:
+        - access-token: []
+  /users:
+    get:
+      operationId: UsersController_listUsers
+      summary: List users (admin only, keyset pagination)
+      parameters:
+        - name: cursor
+          required: true
+          in: query
+          schema:
+            type: string
+        - name: limit
+          required: true
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ""
+      tags:
+        - Users
+      security:
+        - access-token: []
+info:
+  title: Amrutam Telemedicine API
+  description: Production-grade telemedicine backend
+  version: "1.0"
+  contact: {}
+tags: []
+servers: []
+components:
+  securitySchemes:
+    access-token:
+      scheme: bearer
+      bearerFormat: JWT
+      type: http
+  schemas:
+    RegisterDto:
+      type: object
+      properties:
+        email:
+          type: string
+          example: patient@example.com
+        password:
+          type: string
+          minLength: 8
+          example: SecureP@ss123!
+        firstName:
+          type: string
+          minLength: 1
+          example: Jane
+        lastName:
+          type: string
+          minLength: 1
+          example: Doe
+        role:
+          type: string
+          enum:
+            - patient
+            - doctor
+          default: patient
+        licenseNumber:
+          type: string
+          example: MED-12345
+        specializations:
+          example:
+            - Ayurveda
+            - General Medicine
+          type: array
+          items:
+            type: string
+        experienceYears:
+          type: number
+          example: 5
+        feeCents:
+          type: number
+          example: 50000
+          description: Fee in paise (INR cents)
+      required:
+        - email
+        - password
+        - firstName
+        - lastName
+    LoginDto:
+      type: object
+      properties:
+        email:
+          type: string
+          example: patient@example.com
+        password:
+          type: string
+          example: SecureP@ss123!
+      required:
+        - email
+        - password
+    MfaVerifyDto:
+      type: object
+      properties:
+        mfaToken:
+          type: string
+          description: Short-lived MFA token from login step 1
+        totpCode:
+          type: string
+          minLength: 6
+          maxLength: 6
+          description: 6-digit TOTP code
+        recoveryCode:
+          type: string
+          description: Single-use recovery code
+      required:
+        - mfaToken
+    RefreshTokenDto:
+      type: object
+      properties:
+        refreshToken:
+          type: string
+      required:
+        - refreshToken
