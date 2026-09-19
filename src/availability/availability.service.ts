@@ -11,12 +11,16 @@ import { CreateSlotDto } from './dto/create-slot.dto';
 import { BulkCreateSlotsDto } from './dto/bulk-create-slots.dto';
 import { QuerySlotsDto } from './dto/query-slots.dto';
 import { SlotStatus } from './entities/availability-slot.entity';
+import { CacheService } from '../common/cache/cache.service';
 
 @Injectable()
 export class AvailabilityService {
   private readonly logger = new Logger(AvailabilityService.name);
 
-  constructor(private readonly dataSource: DataSource) {}
+  constructor(
+    private readonly dataSource: DataSource,
+    private readonly cacheService: CacheService,
+  ) {}
 
   /**
    * Convert string to 32-bit integer for pg_advisory_xact_lock.
@@ -79,6 +83,7 @@ export class AvailabilityService {
       );
 
       this.logger.log({ msg: 'Slot created', slotId: id, doctorId, startTime, endTime });
+      await this.cacheService.invalidateNamespace('search:doctors');
       return {
         id: rows[0].id,
         partitionMonth: rows[0].partition_month,
@@ -182,6 +187,7 @@ export class AvailabilityService {
       }
 
       this.logger.log({ msg: 'Bulk slots created', doctorId, count: createdSlots.length });
+      await this.cacheService.invalidateNamespace('search:doctors');
       return { count: createdSlots.length, slots: createdSlots };
     });
   }
@@ -221,6 +227,7 @@ export class AvailabilityService {
       );
 
       this.logger.log({ msg: 'Slot cancelled', slotId, doctorId });
+      await this.cacheService.invalidateNamespace('search:doctors');
       return { message: 'Slot cancelled successfully' };
     });
   }
@@ -285,6 +292,7 @@ export class AvailabilityService {
         msg: 'Expired holds released and consultations cancelled',
         count: expiredSlots.length,
       });
+      await this.cacheService.invalidateNamespace('search:doctors');
       return expiredSlots.length;
     });
   }

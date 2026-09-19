@@ -141,7 +141,8 @@ export class SagaOutboxService {
     const rows = await this.dataSource.query(
       `SELECT id FROM consultations
        WHERE status = 'PENDING_PAYMENT'
-         AND created_at < now() - interval '${timeoutMinutes} minutes'`,
+         AND created_at < now() - interval '${timeoutMinutes} minutes'
+       LIMIT 50`,
     );
 
     let cancelledCount = 0;

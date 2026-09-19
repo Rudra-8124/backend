@@ -3,6 +3,7 @@ import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
 import { AvailabilityService } from './availability/availability.service';
 import { SagaOutboxService } from './consultations/saga-outbox.service';
+import { AdminAnalyticsService } from './admin-analytics/admin-analytics.service';
 
 async function bootstrap() {
   const app = await NestFactory.createApplicationContext(AppModule, {
@@ -15,6 +16,7 @@ async function bootstrap() {
 
   const availabilityService = app.get(AvailabilityService);
   const sagaOutboxService = app.get(SagaOutboxService);
+  const adminAnalyticsService = app.get(AdminAnalyticsService);
   logger.log('Worker process started — running background saga & maintenance jobs');
 
   // 1. Initial partition maintenance on startup
@@ -94,6 +96,17 @@ async function bootstrap() {
       logger.error(`Error in partition maintenance worker: ${errorMsg}`);
     }
   }, PARTITION_MAINTENANCE_INTERVAL_MS);
+
+  // 7. Materialized view refresh for admin analytics (every 5 minutes)
+  const MV_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+  setInterval(async () => {
+    try {
+      await adminAnalyticsService.refreshMaterializedView();
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      logger.error(`Error in analytics materialized view refresh worker: ${errorMsg}`);
+    }
+  }, MV_REFRESH_INTERVAL_MS);
 }
 
 bootstrap();

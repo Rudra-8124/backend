@@ -18,6 +18,8 @@
     "migration:run": "ts-node -r tsconfig-paths/register ./node_modules/typeorm/cli.js migration:run -d src/common/database/typeorm.config.ts",
     "migration:revert": "ts-node -r tsconfig-paths/register ./node_modules/typeorm/cli.js migration:revert -d src/common/database/typeorm.config.ts",
     "seed": "ts-node -r tsconfig-paths/register seeds/admin-seed.ts",
+    "seed:benchmark": "ts-node -r tsconfig-paths/register seeds/benchmark-seed.ts",
+    "audit:verify": "ts-node -r tsconfig-paths/register scripts/verify-audit-chain.ts",
     "openapi:export": "ts-node -r tsconfig-paths/register scripts/export-openapi.ts"
   },
   "dependencies": {

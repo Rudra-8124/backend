@@ -153,10 +153,14 @@ describe('Availability and Booking Core (e2e)', () => {
 
   afterAll(async () => {
     if (dataSource) {
-      await dataSource.query("DELETE FROM consultations WHERE reason LIKE '%test%' OR TRUE");
-      await dataSource.query('DELETE FROM availability_slots WHERE TRUE');
-      await dataSource.query('DELETE FROM outbox_events WHERE TRUE');
-      await dataSource.query('DELETE FROM idempotency_keys WHERE TRUE');
+      if (doctorId) {
+        await dataSource.query('DELETE FROM consultations WHERE doctor_id = $1', [doctorId]);
+        await dataSource.query('DELETE FROM availability_slots WHERE doctor_id = $1', [doctorId]);
+      }
+      if (doctor2Id) {
+        await dataSource.query('DELETE FROM consultations WHERE doctor_id = $1', [doctor2Id]);
+        await dataSource.query('DELETE FROM availability_slots WHERE doctor_id = $1', [doctor2Id]);
+      }
       await dataSource.query("DELETE FROM users WHERE email LIKE '%@test.com'");
     }
     if (redis) {

@@ -11,6 +11,7 @@ import { RedisModule } from './common/redis/redis.module';
 import { CryptoModule } from './common/crypto/crypto.module';
 import { RateLimitModule } from './common/rate-limit/rate-limit.module';
 import { HealthModule } from './common/health/health.module';
+import { CacheModule } from './common/cache/cache.module';
 import { ProblemDetailsFilter } from './common/filters/problem-details.filter';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { RolesGuard } from './common/guards/roles.guard';
@@ -49,6 +50,7 @@ import { IdempotencyModule } from './idempotency/idempotency.module';
     CryptoModule,
     RateLimitModule,
     HealthModule,
+    CacheModule,
 
     // ── Domain modules ──
     AuthModule,

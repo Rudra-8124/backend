@@ -39,6 +39,15 @@ export class Doctor {
   @Column({ type: 'int', name: 'fee_cents' })
   feeCents!: number;
 
+  @Column({ type: 'text', array: true, default: '{}' })
+  languages!: string[];
+
+  @Column({ type: 'numeric', precision: 3, scale: 2, default: 0.0, name: 'rating_avg' })
+  ratingAvg!: number;
+
+  @Column({ type: 'int', default: 0, name: 'rating_count' })
+  ratingCount!: number;
+
   @Column({ type: 'boolean', default: false, name: 'is_verified' })
   isVerified!: boolean;
 

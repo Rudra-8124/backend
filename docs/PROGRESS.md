@@ -3,7 +3,7 @@ Phase 0 plan/design ........ [x] ← completed 2026-09-19
 Phase 1 foundation/auth ..... [x] ← completed 2026-09-19
 Phase 2 booking ............. [x] ← completed 2026-09-19
 Phase 3 consult/pay/saga .... [x] ← completed 2026-09-19
-Phase 4 search/cache/admin .. [ ]
+Phase 4 search/cache/admin .. [x] ← completed 2026-09-19
 Phase 5 observability ....... [ ]
 Phase 6 CI/infra/load test .. [ ]
 Phase 7 docs ................ [ ]
@@ -146,19 +146,60 @@ Phase 8 final audit ......... [ ]
   - Failure Path 7: Circuit Breaker Trips on Outage -> Transitions to `OPEN`, fast-fails downstream requests, recovers on health restoration
   - Failure Path 8: Worker Crashes Mid-Relay -> Stuck `PROCESSING` event recovered to `PENDING` with no lost effect and zero duplicates
 
+## Phase 4 — Done
+- [x] Search, Analytics & Audit Migration (`1700000000004-SearchAnalyticsAudit.ts`):
+  - Enabled `pg_trgm` extension for typo-tolerant trigram search
+  - Added `languages` (text array with GIN index), `rating_avg`, and `rating_count` to `doctors`
+  - Created composite B-tree index `idx_doctors_fee_rating` on `(fee_cents, rating_avg)`
+  - Created trigram GIN indexes `idx_profiles_name_trgm` (on concatenated `first_name || ' ' || last_name`) and `idx_doctors_bio_trgm` (on `bio`)
+  - Created materialized view `daily_consultation_analytics_mv` with unique index `(day, doctor_id)` and date index `(day)` for concurrent refresh
+  - Created non-superuser database role `amrutam_app` and revoked `UPDATE` and `DELETE` on `audit_logs` (and all monthly partitions)
+- [x] Doctor Search & Multi-Filter Engine (`src/search/`):
+  - Full-text search over `tsvector` + GIN index with `plainto_tsquery('english', $q)` (safely handling empty tsqueries from punctuation/special characters)
+  - Typo-tolerant trigram similarity search fallback (`similarity(name, $q) > 0.2`)
+  - Multi-attribute filtering: specialty, language, fee range (`min_price`, `max_price`), `min_rating`, `city`, and availability window (`available_from`, `available_to`)
+  - Sorting options: `price_asc`, `price_desc`, `rating_desc`, `experience_desc`, `relevance`
+  - Opaque keyset pagination via base64 cursor encoding `(id, sortValue)` ensuring zero `OFFSET` scanning overhead
+  - Strict parameterized queries protecting against SQL injection attacks
+- [x] Redis Cache-Aside & Stampede Protection (`src/common/cache/`):
+  - Normalized query hash keys (`search:doctors:v{version}:{hash}`) and profile keys (`doctor:profile:v{version}:{id}`)
+  - Short TTL with random +/- 10% jitter to prevent synchronized expiration cascades
+  - Namespace versioning invalidation (`INCR version:namespace`) avoiding high-latency `KEYS`/`SCAN` operations
+  - Stampede single-flight distributed lock (`SET lock:key token NX PX 5000`) with polling fallback and Lua unlock
+  - Cache invalidation on doctor profile updates (`PATCH /doctors/me`) and availability slot mutations (create, cancel, hold expiry)
+- [x] Admin Analytics Engine (`src/admin-analytics/`):
+  - Materialized view `daily_consultation_analytics_mv` refreshed concurrently every 5 minutes by background worker job
+  - `GET /admin/analytics/consultations`: aggregate totals, daily time-series, completion rate, cancellation rate, no-show rate, revenue
+  - `GET /admin/analytics/doctors`: doctor productivity, utilization rate, revenue, keyset pagination
+  - `POST /admin/analytics/refresh`: manual concurrent refresh endpoint
+  - Strict 90-day maximum date range enforcement (HTTP 400 if exceeded)
+  - Strict RBAC protection: admin-only access (HTTP 403 for patients and doctors)
+- [x] Audit Module & Cryptographic Tamper Verifier (`src/audit/` & `scripts/verify-audit-chain.ts`):
+  - Append-only `audit_logs` table partitioned by month with SHA-256 hash chains (`ADR-005`)
+  - Verifier script (`npm run audit:verify`) and endpoint `GET /admin/audit-logs/verify` cryptographically validating genesis row and unbroken hash chains
+  - Admin log query endpoint `GET /admin/audit-logs` with filters and keyset pagination
+  - Restricted role `amrutam_app` enforcing append-only immutability at the PostgreSQL engine level (`UPDATE` and `DELETE` denied with SQLSTATE 42501)
+- [x] High-Volume Benchmark & EXPLAIN ANALYZE:
+  - Seed script (`seeds/benchmark-seed.ts`) populating 5,000 verified doctors and 100,000 partitioned consultations across past 60 days
+  - Real execution plans documented in `docs/explain-analyze.md`:
+    - Doctor search query executes in **6.55 ms** via GIN index scan (`idx_doctors_search_vector`)
+    - Admin analytics daily report executes in **24.1 ms** scanning 51,493 pre-aggregated rows via index scan (`idx_daily_analytics_mv_day`)
+
 ## Verified
 - `npm run typecheck`: 0 errors
-- `npm run lint`: 0 errors (14 warnings for intentional `any` in seed/test)
+- `npm run lint`: 0 errors (28 warnings for explicit any)
 - `npm test`: 10 passed, 10 total (Crypto unit tests)
-- `npm run test:e2e`: 66 passed, 66 total
+- `npm run test:e2e`: 85 passed, 85 total
   - `test/auth.e2e-spec.ts`: 27 passed, 27 total
   - `test/booking.e2e-spec.ts`: 20 passed, 20 total
   - `test/phase3.e2e-spec.ts`: 19 passed, 19 total
-- Total Test Suite: 76 passed, 76 total (100% passing)
+  - `test/phase4.e2e-spec.ts`: 19 passed, 19 total
+- Total Test Suite: 95 passed, 95 total (100% passing)
+- `npm run audit:verify`: All 15 audit rows verified cryptographically, chain intact
 - `npm run openapi:export`: OpenAPI spec exported cleanly to `docs/openapi.yaml`
 
 ## Known gaps
-- Phase 4: Postgres full-text search (tsvector + GIN) for doctors/specialties, Redis cache-aside with TTL and invalidation, keyset pagination, admin analytics dashboard & metrics aggregation.
+- Phase 5: Observability — OpenTelemetry traces, Prometheus RED metrics per route, queue depth and booking conflict counters, structured JSON logs with trace correlation, health/readiness endpoints, Grafana dashboard JSON, SLO burn-rate alert rules (99.95%).
 
 ## Next
-Phase 4: Search, Cache-Aside, Invalidation & Admin Analytics — doctor full-text search with GIN index and filters, Redis cache-aside caching with TTL and invalidation on doctor profile/availability changes, keyset pagination for high-scale feeds, and admin analytics queries.
+Phase 5: Observability — OpenTelemetry instrumentation, Prometheus metrics exporter, RED metrics per route, queue depth and booking conflict counters, Grafana dashboard JSON, and alerting rules with multi-window multi-burn-rate SLO alerts.
