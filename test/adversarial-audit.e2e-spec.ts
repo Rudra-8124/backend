@@ -6,6 +6,8 @@ import { Logger } from 'nestjs-pino';
 import Redis from 'ioredis';
 import { REDIS_CLIENT } from '../src/common/redis/redis.constants';
 import { randomUUID, createHmac } from 'crypto';
+import * as argon2 from 'argon2';
+import * as jwt from 'jsonwebtoken';
 import { ConfigService } from '@nestjs/config';
 import { authenticator } from 'otplib';
 
