@@ -6,3 +6,7 @@ coverage/
 *.rdb
 dump.rdb
 .jest-cache/
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log

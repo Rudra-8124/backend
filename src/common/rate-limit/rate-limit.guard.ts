@@ -40,6 +40,9 @@ export class RateLimitGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
+    if (process.env.RATE_LIMIT_DISABLED === 'true') {
+      return true;
+    }
     if (!config) return true; // no rate limit configured
 
     const request = context.switchToHttp().getRequest();

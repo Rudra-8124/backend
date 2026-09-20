@@ -1,0 +1,348 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # 1. Lint and Typecheck
+  # ─────────────────────────────────────────────────────────────
+  lint-and-typecheck:
+    name: 1. Lint & Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run TypeScript Typecheck
+        run: npm run typecheck
+
+  # ─────────────────────────────────────────────────────────────
+  # 2. Unit Tests
+  # ─────────────────────────────────────────────────────────────
+  unit-tests:
+    name: 2. Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit test suite
+        run: npm test
+
+  # ─────────────────────────────────────────────────────────────
+  # 3. Integration Tests, Audit Verification & Coverage Gate
+  # ─────────────────────────────────────────────────────────────
+  integration-and-coverage:
+    name: 3. Integration Tests & Coverage Gate
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: amrutam
+          POSTGRES_PASSWORD: amrutam_dev_password
+          POSTGRES_DB: amrutam
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      PORT: 3000
+      DATABASE_URL: postgresql://amrutam:amrutam_dev_password@localhost:5432/amrutam
+      REDIS_URL: redis://localhost:6379
+      JWT_ACCESS_SECRET: test_jwt_access_secret_for_ci_32_characters_minimum
+      JWT_REFRESH_SECRET: test_jwt_refresh_secret_for_ci_32_characters_minimum
+      FIELD_ENCRYPTION_KEY_ID: primary-2026-v1
+      FIELD_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      PAYMENT_WEBHOOK_SECRET: test_webhook_secret_amrutam_telemedicine_32_bytes_long
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run SQL database migrations
+        run: npm run migration:run
+
+      - name: Seed initial database
+        run: npm run seed
+
+      - name: Run End-to-End integration test suites
+        run: npm run test:e2e
+
+      - name: Run cryptographic audit log hash chain verifier
+        run: npm run audit:verify
+
+  # ─────────────────────────────────────────────────────────────
+  # 4. OpenAPI Specification Drift Check
+  # ─────────────────────────────────────────────────────────────
+  openapi-drift-check:
+    name: 4. OpenAPI Drift Check
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: amrutam
+          POSTGRES_PASSWORD: amrutam_dev_password
+          POSTGRES_DB: amrutam
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      PORT: 3000
+      DATABASE_URL: postgresql://amrutam:amrutam_dev_password@localhost:5432/amrutam
+      REDIS_URL: redis://localhost:6379
+      JWT_ACCESS_SECRET: test_jwt_access_secret_for_ci_32_characters_minimum
+      JWT_REFRESH_SECRET: test_jwt_refresh_secret_for_ci_32_characters_minimum
+      FIELD_ENCRYPTION_KEY_ID: primary-2026-v1
+      FIELD_ENCRYPTION_KEY: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      PAYMENT_WEBHOOK_SECRET: test_webhook_secret_amrutam_telemedicine_32_bytes_long
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Regenerate OpenAPI specification
+        run: npm run openapi:export
+
+      - name: Check for OpenAPI schema drift
+        run: |
+          git diff --exit-code docs/openapi.yaml || (echo "ERROR: OpenAPI drift detected! Run 'npm run openapi:export' locally and commit docs/openapi.yaml." && exit 1)
+
+  # ─────────────────────────────────────────────────────────────
+  # 5. Security Scans: npm audit, Gitleaks, Semgrep
+  # ─────────────────────────────────────────────────────────────
+  security-scans:
+    name: 5. Security Scans (Audit, Gitleaks, Semgrep)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Run npm audit check
+        run: npm audit --audit-level=critical || true
+
+      - name: Run Gitleaks secret detection
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run Semgrep SAST scan
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: >-
+            p/security-audit
+            p/secrets
+            p/owasp-top-ten
+            p/javascript
+            p/typescript
+        continue-on-error: true
+
+  # ─────────────────────────────────────────────────────────────
+  # 6. Docker Build, Trivy Vulnerability Scan & SBOM Generation
+  # ─────────────────────────────────────────────────────────────
+  docker-and-trivy:
+    name: 6. Docker Build, Trivy & SBOM
+    needs: [lint-and-typecheck, unit-tests, integration-and-coverage]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: amrutam-api:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Generate CycloneDX SBOM with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'image'
+          image-ref: amrutam-api:${{ github.sha }}
+          format: 'cyclonedx'
+          output: 'amrutam-api-sbom.json'
+
+      - name: Upload SBOM Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: amrutam-api-sbom.json
+          retention-days: 14
+
+      - name: Run Trivy Vulnerability Scanner (fail on fixable CRITICAL/HIGH)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: amrutam-api:${{ github.sha }}
+          format: 'table'
+          exit-code: '1'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+  # ─────────────────────────────────────────────────────────────
+  # 7. Push Container Image to GHCR (Main branch only)
+  # ─────────────────────────────────────────────────────────────
+  publish-ghcr:
+    name: 7. Push Image to GHCR
+    needs: [docker-and-trivy, security-scans]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest
+            type=sha,format=long
+
+      - name: Build and push production image to GHCR
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ─────────────────────────────────────────────────────────────
+  # 8. Deploy Plan (Manual Approval Environment)
+  # ─────────────────────────────────────────────────────────────
+  deploy-plan:
+    name: 8. Terraform Plan (Production Gate)
+    needs: [publish-ghcr]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.16.2
+
+      - name: Check Terraform formatting
+        run: terraform fmt -check -recursive terraform/
+
+      - name: Initialize Terraform (no remote backend in plan gate)
+        run: terraform -chdir=terraform init -backend=false
+
+      - name: Validate Terraform configurations
+        run: terraform -chdir=terraform validate

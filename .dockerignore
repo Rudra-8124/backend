@@ -1,0 +1,16 @@
+node_modules
+dist
+coverage
+.git
+.github
+.vscode
+.idea
+*.log
+*.env*
+!*.env.example
+docker/
+docs/
+test/
+k6/
+terraform/
+README.md

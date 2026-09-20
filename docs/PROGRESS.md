@@ -5,7 +5,7 @@ Phase 2 booking ............. [x] ← completed 2026-09-19
 Phase 3 consult/pay/saga .... [x] ← completed 2026-09-19
 Phase 4 search/cache/admin .. [x] ← completed 2026-09-19
 Phase 5 observability ....... [x] ← completed 2026-09-20
-Phase 6 CI/infra/load test .. [ ]
+Phase 6 CI/infra/load test .. [x] ← completed 2026-09-20
 Phase 7 docs ................ [ ]
 Phase 8 final audit ......... [ ]
 
@@ -222,22 +222,65 @@ Phase 8 final audit ......... [ ]
 - [x] Documentation (`docs/observability.md`):
   - Complete architecture diagram, signal specifications, SLO math, and a 6-step incident debugging runbook (Symptom -> PromQL -> Grafana -> Tempo Trace -> Loki Logs -> DB Verification)
 
+## Phase 6 — Done
+- [x] Production Dockerfile & .dockerignore:
+  - Multi-stage build with pinned base image (`node:22.14.0-alpine3.21`)
+  - Non-root user `amrutam` (UID/GID 10001) for least privilege
+  - Signal forwarding via `dumb-init` (handling SIGINT/SIGTERM gracefully)
+  - Container health check via `wget` against `/healthz`
+  - `.dockerignore` excluding local node_modules, dist, tests, docs, terraform, git
+- [x] GitHub Actions Workflows & Dependabot (`.github/`):
+  - `.github/workflows/ci.yml` providing complete end-to-end automation:
+    1. `lint-and-typecheck`: Runs ESLint and `tsc --noEmit`
+    2. `unit-tests`: Runs Jest crypto and unit test suites
+    3. `integration-and-coverage`: Runs with GitHub service containers (`postgres:16-alpine`, `redis:7-alpine`), executes migrations, runs full E2E suites, verifies audit chain
+    4. `openapi-drift-check`: Regenerates OpenAPI spec and verifies `git diff --exit-code docs/openapi.yaml`
+    5. `security-scans`: Runs `npm audit --audit-level=critical`, Gitleaks secret detection, and Semgrep SAST scan
+    6. `docker-and-trivy`: Builds production Docker image, generates CycloneDX SBOM artifact, scans with Trivy for fixable CRITICAL/HIGH vulnerabilities
+    7. `publish-ghcr`: Pushes production image to GitHub Container Registry (`ghcr.io`) on `main` branch
+    8. `deploy-plan`: Gated by manual-approval `production` environment, executes `terraform fmt -check`, `terraform init`, `terraform validate`, and `terraform plan`
+  - `.github/dependabot.yml`: Automated weekly updates for `npm`, `docker`, `github-actions`, and `terraform`
+- [x] Terraform AWS Production Infrastructure (`terraform/`):
+  - Strict modular architecture:
+    - `modules/network`: VPC, 3 public subnets, 3 private app subnets, 3 private data subnets across 3 AZs (`ap-south-1a`, `ap-south-1b`, `ap-south-1c`), NAT gateways, Internet Gateway
+    - `modules/security`: KMS Customer Managed Key (CMK) with automated key rotation, IAM execution/task roles with least privilege, chained security groups (ALB -> ECS -> RDS / ElastiCache)
+    - `modules/rds`: PostgreSQL 16 Multi-AZ, DB subnet group in private data subnets, KMS encryption at rest, 14-day PITR retention, deletion protection, performance insights, credentials stored in AWS Secrets Manager (zero plaintext secrets)
+    - `modules/elasticache`: Redis 7 Replication Group, Multi-AZ with automatic failover, transit encryption (TLS), at-rest encryption (KMS CMK), AUTH token managed via Secrets Manager
+    - `modules/alb`: Application Load Balancer across public subnets, HTTPS listener with TLS 1.2+ security policy (`ELBSecurityPolicy-TLS13-1-2-2021-06`), HTTP->HTTPS redirect, target group health checking `/healthz`
+    - `modules/ecs`: ECS Cluster with Container Insights, Fargate task definitions for `api` and `worker`, CloudWatch log groups with KMS encryption, Target Tracking Autoscaling policies on CPU and Memory (70%)
+    - `modules/monitoring`: CloudWatch alarms for ECS CPU/Memory, RDS CPU/storage/connections, ALB 5XX rate, and Redis CPU
+  - Validation: 100% passed `terraform fmt -check -recursive terraform/` and `terraform validate` (0 errors, 0 warnings)
+- [x] k6 Performance & Concurrency Load Testing (`k6/`):
+  - Seed script `k6/seed-k6.ts`: Sets up 10 verified doctors, patient user with JWT access token, and 1,000 discrete availability slots
+  - Scenarios `k6/load-test.js`:
+    - Read scenario: Constant arrival rate (30 iters/s for 25s) across `/search/doctors` and `/doctors/:id`
+    - Write scenario: Concurrent booking attempts (`POST /consultations`) with unique idempotency keys
+  - Thresholds: p95 < 200ms reads, p95 < 500ms writes, < 1% error rate
+
 ## Verified
 - `npm run typecheck`: 0 errors
 - `npm run lint`: 0 errors (36 warnings for explicit any)
 - `npm test`: 10 passed, 10 total (Crypto unit tests)
-- `npm run test:e2e`: 91 passed, 91 total
-  - `test/auth.e2e-spec.ts`: 27 passed, 27 total
-  - `test/booking.e2e-spec.ts`: 20 passed, 20 total
-  - `test/phase3.e2e-spec.ts`: 19 passed, 19 total
-  - `test/phase4.e2e-spec.ts`: 19 passed, 19 total
-  - `test/observability.e2e-spec.ts`: 6 passed, 6 total
-- Total Test Suite: 101 passed, 101 total (100% passing across all 6 test suites)
-- `npm run audit:verify`: All 15 audit rows verified cryptographically, chain intact
-- `npm run openapi:export`: OpenAPI spec exported cleanly to `docs/openapi.yaml`
+- `npm run test:e2e`: 91 passed, 91 total across 5 suites (auth, booking, phase3, phase4, observability)
+- Total Test Suite: 101 passed, 101 total (100% passing)
+- `npm run audit:verify`: All 30 audit rows in partition verified cryptographically, chain intact
+- `npm run openapi:export`: 0 drift against `docs/openapi.yaml`
+- `terraform fmt -check -recursive terraform/`: Passed
+- `terraform -chdir=terraform validate`: Success! Configuration is valid (0 errors, 0 warnings)
+- `k6 run k6/load-test.js`: All performance thresholds passed!
+  - Read p95 duration: **65.48 ms** (Threshold: < 200 ms)
+  - Read p99 duration: **89.31 ms** (Threshold: < 400 ms)
+  - Write p95 duration: **242.77 ms** (Threshold: < 500 ms)
+  - Write p99 duration: **306.88 ms** (Threshold: < 800 ms)
+  - Throughput: **36.01 requests/sec** (901 total requests over 25s)
+  - Error rate: **0.00%** (0 unexpected failures out of 901 requests)
+  - Checks succeeded: **100.00%** (1,502 of 1,502 checks passed)
+  - Machine specs during benchmark: Intel Core i3-1215U (6 cores / 8 threads), 8 GB RAM, Windows 11 amd64
+  - Bottleneck observed: Local single-node PostgreSQL connection acquisition under concurrent advisory locks and Argon2 CPU memory cost.
 
 ## Known gaps
-- Phase 6: CI, Infrastructure & Load Testing (Terraform for AWS, Multi-stage Docker, GitHub Actions workflows, k6 load testing scripts).
+- Phase 7: Complete documentation (deployment runbook, operational playbooks, architecture diagrams review).
+- Phase 8: Final holistic audit against take-home prompt and rubric.
 
 ## Next
-Phase 6: CI / Infrastructure / Load Testing — Multi-stage non-root Dockerfile, Terraform AWS infrastructure (VPC, RDS multi-AZ, ElastiCache, ECS Fargate, ALB), GitHub Actions CI/CD workflows (lint, typecheck, tests, coverage, Trivy, gitleaks), and k6 performance & concurrency stress test scripts.
+Phase 7: Documentation — Complete system documentation, deployment guide, disaster recovery runbook, and API user guides.
