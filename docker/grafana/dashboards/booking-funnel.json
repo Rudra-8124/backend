@@ -1,0 +1,99 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "title": "Booking Attempts by Result",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(booking_attempts_total[1m])) by (result)",
+          "legendFormat": "{{result}}"
+        }
+      ]
+    },
+    {
+      "title": "Booking Success Rate (%)",
+      "type": "gauge",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 100,
+          "unit": "percent",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 95 },
+              { "color": "green", "value": 99 }
+            ]
+          }
+        }
+      },
+      "targets": [
+        {
+          "expr": "100 * (sum(rate(booking_attempts_total{result=\"success\"}[5m])) / clamp_min(sum(rate(booking_attempts_total[5m])), 0.001))",
+          "legendFormat": "Success Rate"
+        }
+      ]
+    },
+    {
+      "title": "Idempotency Replay Rate",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(idempotency_replays_total[5m]))",
+          "legendFormat": "Replays / sec"
+        }
+      ]
+    },
+    {
+      "title": "Slot Conflicts (409 Contention Rate)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "expr": "rate(slot_conflicts_total[1m])",
+          "legendFormat": "Conflicts / sec"
+        }
+      ]
+    },
+    {
+      "title": "Payment Provider Failures & Circuit Breaker",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "expr": "sum(rate(payment_provider_errors_total[1m])) by (error_type)",
+          "legendFormat": "Errors: {{error_type}}"
+        },
+        {
+          "expr": "circuit_breaker_state",
+          "legendFormat": "Circuit Breaker State (0=Closed, 1=Half, 2=Open)"
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["amrutam", "booking", "concurrency"],
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": { "refresh_intervals": ["5s", "10s", "30s", "1m"] },
+  "timezone": "browser",
+  "title": "Booking Funnel & Concurrency",
+  "uid": "amrutam-booking-funnel",
+  "version": 1
+}

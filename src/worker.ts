@@ -1,3 +1,8 @@
+import { initTracing } from './common/observability/tracing';
+
+// Initialize OpenTelemetry tracing before worker loads
+initTracing('amrutam-worker');
+
 import { NestFactory } from '@nestjs/core';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';

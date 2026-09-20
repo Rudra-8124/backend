@@ -1,0 +1,90 @@
+groups:
+  - name: amrutam_slo_alerts
+    rules:
+      # ── 99.95% Availability SLO: Multi-Window Multi-Burn-Rate Alerts ──
+      # Error budget = 1 - 0.9995 = 0.0005 (0.05%)
+      # Fast Burn: 14.4x burn rate consumes 2% of budget in 1 hour
+      # Threshold = 14.4 * 0.0005 = 0.0072 (0.72% error rate)
+      - alert: AvailabilitySLOFastBurn
+        expr: >-
+          (sum(rate(http_requests_total{status_code=~"5.."}[1h])) / clamp_min(sum(rate(http_requests_total[1h])), 1) > 0.0072)
+          and
+          (sum(rate(http_requests_total{status_code=~"5.."}[5m])) / clamp_min(sum(rate(http_requests_total[5m])), 1) > 0.0072)
+        for: 2m
+        labels:
+          severity: critical
+          slo: availability_99_95
+          burn_rate: "14.4x"
+        annotations:
+          summary: "Critical fast burn on 99.95% availability SLO (14.4x over 1h and 5m)"
+          description: "API 5xx error rate is currently consuming error budget at 14.4x. Budget will exhaust in ~50 hours if unchecked."
+
+      # Slow Burn: 6x burn rate consumes 5% of budget in 6 hours
+      # Threshold = 6 * 0.0005 = 0.0030 (0.30% error rate)
+      - alert: AvailabilitySLOSlowBurn
+        expr: >-
+          (sum(rate(http_requests_total{status_code=~"5.."}[6h])) / clamp_min(sum(rate(http_requests_total[6h])), 1) > 0.0030)
+          and
+          (sum(rate(http_requests_total{status_code=~"5.."}[30m])) / clamp_min(sum(rate(http_requests_total[30m])), 1) > 0.0030)
+        for: 15m
+        labels:
+          severity: warning
+          slo: availability_99_95
+          burn_rate: "6x"
+        annotations:
+          summary: "Warning slow burn on 99.95% availability SLO (6x over 6h and 30m)"
+          description: "API 5xx error rate is steadily burning error budget at 6x. 5% budget exhausted in last 6 hours."
+
+      # ── Latency SLO: Read p95 < 200ms, Write p95 < 500ms ──
+      - alert: ReadLatencyOverBudget
+        expr: >-
+          histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{method="GET"}[5m])) by (le)) > 0.200
+        for: 5m
+        labels:
+          severity: warning
+          tier: latency
+        annotations:
+          summary: "p95 read latency exceeds 200ms SLO budget"
+          description: "95th percentile read duration is currently {{ $value }}s on GET routes."
+
+      - alert: WriteLatencyOverBudget
+        expr: >-
+          histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{method=~"POST|PATCH|PUT|DELETE"}[5m])) by (le)) > 0.500
+        for: 5m
+        labels:
+          severity: warning
+          tier: latency
+        annotations:
+          summary: "p95 write latency exceeds 500ms SLO budget"
+          description: "95th percentile write duration is currently {{ $value }}s on mutating routes."
+
+  - name: amrutam_operational_alerts
+    rules:
+      # ── Outbox Lag & DLQ Alerts ──
+      - alert: OutboxLagCritical
+        expr: outbox_lag_seconds > 60
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Outbox oldest event lag is > 60 seconds"
+          description: "Events are waiting in outbox_events without relay. Current lag is {{ $value }}s."
+
+      - alert: DLQGrowthDetected
+        expr: outbox_dlq_total > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Dead Letter Queue (DLQ) contains failed outbox events"
+          description: "Currently {{ $value }} events in DLQ requiring operator investigation."
+
+      # ── Service Availability & Readiness ──
+      - alert: ReadinessFailing
+        expr: up{job="amrutam-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Amrutam API service instance is down or unreachable"
+          description: "Prometheus cannot scrape /metrics or target instance is non-responsive."

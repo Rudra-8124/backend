@@ -1,4 +1,14 @@
-import { Controller, Post, Get, Patch, Body, Param, HttpCode, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Get,
+  Patch,
+  Body,
+  Param,
+  Headers,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiHeader } from '@nestjs/swagger';
 import { ConsultationsService } from './consultations.service';
 import { BookConsultationDto } from './dto/book-consultation.dto';
@@ -23,11 +33,20 @@ export class ConsultationsController {
     description: 'Unique idempotency key for state-changing request',
     required: true,
   })
+  @ApiHeader({
+    name: 'traceparent',
+    description: 'W3C distributed trace context parent header',
+    required: false,
+  })
   @ApiOperation({
     summary: 'Book a consultation slot (Patient only, atomic conditional hold + outbox event)',
   })
-  async bookConsultation(@CurrentUser() user: RequestUser, @Body() dto: BookConsultationDto) {
-    return this.consultationsService.bookConsultation(user.userId, dto);
+  async bookConsultation(
+    @CurrentUser() user: RequestUser,
+    @Body() dto: BookConsultationDto,
+    @Headers('traceparent') traceparent?: string,
+  ) {
+    return this.consultationsService.bookConsultation(user.userId, dto, traceparent);
   }
 
   @Patch(':id/start')

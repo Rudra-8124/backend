@@ -1,7 +1,9 @@
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, Inject, Optional, forwardRef } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { PaymentsService } from '../payments/payments.service';
 import { ConsultationsService } from './consultations.service';
+import { withActiveSpan, withTraceparentContext } from '../common/observability/trace-context';
+import { MetricsService } from '../common/observability/metrics.service';
 
 export interface ProcessOutboxResult {
   processed: number;
@@ -22,6 +24,8 @@ export class SagaOutboxService {
     private readonly paymentsService: PaymentsService,
     @Inject(forwardRef(() => ConsultationsService))
     private readonly consultationsService: ConsultationsService,
+    @Optional()
+    private readonly metricsService?: MetricsService,
   ) {}
 
   /**
@@ -36,7 +40,7 @@ export class SagaOutboxService {
     // 1. Claim batch of events atomically with SELECT FOR UPDATE SKIP LOCKED
     const eventsToProcess = await this.dataSource.transaction(async (manager) => {
       const rows = await manager.query(
-        `SELECT id, event_type, aggregate_id, aggregate_type, payload, status, attempts, retry_count
+        `SELECT id, event_type, aggregate_id, aggregate_type, payload, status, attempts, retry_count, traceparent
          FROM outbox_events
          WHERE status IN ('PENDING', 'FAILED')
            AND (next_retry_at IS NULL OR next_retry_at <= now())
@@ -61,10 +65,27 @@ export class SagaOutboxService {
       return rows;
     });
 
-    // 2. Process each claimed event
+    // 2. Process each claimed event with extracted traceparent context
     for (const event of eventsToProcess) {
+      const payload = typeof event.payload === 'string' ? JSON.parse(event.payload) : event.payload;
+      const traceparent = event.traceparent || payload?._traceparent;
+
       try {
-        await this.handleEvent(event);
+        await withTraceparentContext(traceparent, async () => {
+          await withActiveSpan(
+            `outbox.process:${event.event_type}`,
+            async () => {
+              await this.handleEvent(event, payload);
+            },
+            {
+              attributes: {
+                'outbox.event_id': Number(event.id),
+                'outbox.event_type': event.event_type,
+                'outbox.aggregate_id': String(event.aggregate_id),
+              },
+            },
+          );
+        });
 
         // Mark as PROCESSED
         await this.dataSource.query(
@@ -77,6 +98,7 @@ export class SagaOutboxService {
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : String(err);
         const nextAttempts = (event.attempts || 0) + 1;
+        this.metricsService?.recordPaymentProviderError('mock_payment', 'saga_error');
 
         if (nextAttempts >= this.MAX_ATTEMPTS) {
           // Route to Dead Letter Queue (DLQ)
@@ -173,8 +195,10 @@ export class SagaOutboxService {
   /**
    * Event dispatcher for idempotent saga execution.
    */
-  private async handleEvent(event: any): Promise<void> {
-    const payload = typeof event.payload === 'string' ? JSON.parse(event.payload) : event.payload;
+  private async handleEvent(event: any, parsedPayload?: any): Promise<void> {
+    const payload =
+      parsedPayload ||
+      (typeof event.payload === 'string' ? JSON.parse(event.payload) : event.payload);
 
     switch (event.event_type) {
       case 'consultation.created': {
@@ -195,7 +219,18 @@ export class SagaOutboxService {
 
         // Consult fee or standard default amount
         const amountCents = payload.amountCents || 50000;
-        await this.paymentsService.createPaymentIntent(consultationId, amountCents, 'INR');
+        await withActiveSpan(
+          'saga.create_payment_intent',
+          async () => {
+            await this.paymentsService.createPaymentIntent(consultationId, amountCents, 'INR');
+          },
+          {
+            attributes: {
+              'consultation.id': consultationId,
+              'payment.amount_cents': amountCents,
+            },
+          },
+        );
         break;
       }
 
@@ -207,7 +242,20 @@ export class SagaOutboxService {
           [consultationId],
         );
         if (paidRows.length > 0) {
-          await this.paymentsService.refundConsultation(consultationId, payload.cancellationReason);
+          await withActiveSpan(
+            'saga.refund_consultation',
+            async () => {
+              await this.paymentsService.refundConsultation(
+                consultationId,
+                payload.cancellationReason,
+              );
+            },
+            {
+              attributes: {
+                'consultation.id': consultationId,
+              },
+            },
+          );
         }
         break;
       }

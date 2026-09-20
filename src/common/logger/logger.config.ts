@@ -1,13 +1,14 @@
 import { Params } from 'nestjs-pino';
 import { randomUUID } from 'crypto';
+import { getCurrentTraceId, getCurrentSpanId } from '../observability/trace-context';
 
-/** Pino logger configuration with PII/PHI redaction */
+/** Pino logger configuration with PII/PHI redaction and OpenTelemetry trace correlation */
 export function pinoLoggerConfig(): Params {
   return {
     pinoHttp: {
       level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
       transport:
-        process.env.NODE_ENV !== 'production'
+        process.env.NODE_ENV !== 'production' && process.env.PINO_PRETTY === 'true'
           ? { target: 'pino-pretty', options: { colorize: true, singleLine: true } }
           : undefined,
       redact: {
@@ -29,6 +30,27 @@ export function pinoLoggerConfig(): Params {
       },
       genReqId: (req: any) =>
         (req.headers ? (req.headers['x-request-id'] as string) : undefined) || randomUUID(),
+      customProps: (_req: any, _res: any) => {
+        const traceId = getCurrentTraceId();
+        const spanId = getCurrentSpanId();
+        return {
+          ...(traceId ? { trace_id: traceId } : {}),
+          ...(spanId ? { span_id: spanId } : {}),
+        };
+      },
+      formatters: {
+        log: (object: Record<string, any>) => {
+          const traceId = getCurrentTraceId();
+          const spanId = getCurrentSpanId();
+          if (traceId && !object.trace_id) {
+            object.trace_id = traceId;
+          }
+          if (spanId && !object.span_id) {
+            object.span_id = spanId;
+          }
+          return object;
+        },
+      },
       serializers: {
         req: (req: any) => ({
           method: req.method,

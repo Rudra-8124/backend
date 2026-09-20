@@ -1,3 +1,8 @@
+import { initTracing } from './common/observability/tracing';
+
+// Initialize OpenTelemetry tracing before modules load
+initTracing('amrutam-api');
+
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { ConfigService } from '@nestjs/config';

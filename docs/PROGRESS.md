@@ -4,7 +4,7 @@ Phase 1 foundation/auth ..... [x] ← completed 2026-09-19
 Phase 2 booking ............. [x] ← completed 2026-09-19
 Phase 3 consult/pay/saga .... [x] ← completed 2026-09-19
 Phase 4 search/cache/admin .. [x] ← completed 2026-09-19
-Phase 5 observability ....... [ ]
+Phase 5 observability ....... [x] ← completed 2026-09-20
 Phase 6 CI/infra/load test .. [ ]
 Phase 7 docs ................ [ ]
 Phase 8 final audit ......... [ ]
@@ -185,21 +185,59 @@ Phase 8 final audit ......... [ ]
     - Doctor search query executes in **6.55 ms** via GIN index scan (`idx_doctors_search_vector`)
     - Admin analytics daily report executes in **24.1 ms** scanning 51,493 pre-aggregated rows via index scan (`idx_daily_analytics_mv_day`)
 
+## Phase 5 — Done
+- [x] Observability Migration (`1700000000005-ObservabilityTraceparent.ts`):
+  - Added `traceparent` column (`VARCHAR(255)`) to `outbox_events`
+  - Created B-tree index `idx_outbox_traceparent` on `outbox_events(traceparent)`
+- [x] OpenTelemetry Distributed Tracing (`src/common/observability/tracing.ts` & `trace-context.ts`):
+  - NodeSDK initialized with `HttpInstrumentation`, `PgInstrumentation` (enhanced DB reporting), and `IORedisInstrumentation`
+  - Manual spans covering key booking lifecycle operations: `booking.hold_slot`, `booking.create_consultation`, `saga.create_payment_intent`, `saga.confirm_consultation`, `saga.refund_consultation`
+  - W3C trace context extraction & injection: captures incoming `traceparent` header (or generates new valid trace ID) and stores it in `outbox_events.traceparent`
+  - Worker outbox relay extracts stored `traceparent` via `withTraceparentContext` ensuring consultation booking forms **ONE continuous unbroken trace** across stateless API and background worker
+- [x] Prometheus Metrics & High-Cardinality Protection (`src/common/observability/metrics.service.ts` & `metrics.interceptor.ts`):
+  - Strict route template normalization (`req.routeOptions?.url || req.routerPath` with regex fallback replacing UUIDs with `:id`), strictly avoiding high-cardinality label explosions
+  - RED metrics: `http_requests_total{method, route, status_code}`, `http_request_duration_seconds{method, route, status_code}` histogram
+  - Business & resilience counters: `booking_attempts_total{result}`, `slot_conflicts_total`, `idempotency_replays_total`, `payment_provider_errors_total{error_type}`, `circuit_breaker_state{state}`
+  - Infrastructure gauges: `outbox_lag_seconds`, `outbox_pending_total`, `outbox_dlq_total`, real-time `db_pool_connections{state="used|idle|waiting|max"}`
+  - `@Public()` metrics endpoint: `GET /metrics` returning Prometheus-formatted text
+- [x] Pino Structured Logging with Trace Correlation (`src/common/logger/logger.config.ts`):
+  - Log formatters extracting active `trace_id` and `span_id` from OpenTelemetry active span
+  - Strict PII/PHI redaction paths protecting passwords, TOTP codes, clinical notes, patient diagnosis, encryption keys, and payment tokens
+- [x] Docker-Compose Observability Stack (`docker-compose.yml` & `docker/*`):
+  - `otel-collector`: OpenTelemetry Collector routing OTLP trace and metric telemetry
+  - `tempo`: Distributed tracing backend receiving OTLP gRPC/HTTP traces from collector
+  - `loki`: Structured log aggregation backend with retention configuration
+  - `prometheus`: Scrapes API and worker metrics every 15s; alert rules loaded from `docker/prometheus-alerts.yaml`
+  - `grafana`: Pre-configured datasources (`prometheus`, `tempo`, `loki`) and dashboard providers
+- [x] Grafana Dashboards (`docker/grafana/dashboards/*.json`):
+  - `red-metrics.json`: RED metrics per route (Rate, Errors, Duration p50/p95/p99)
+  - `booking-funnel.json`: Booking funnel conversion, conflict rates, slot contention, idempotency replays
+  - `queue-outbox-health.json`: Outbox lag, pending count, DLQ dead-letter queue growth, worker throughput
+  - `db-redis-health.json`: PostgreSQL connection pool saturation, cache hit/miss ratio, query latencies
+- [x] Multi-Window Multi-Burn-Rate Alert Rules (`docker/prometheus-alerts.yaml`):
+  - 99.95% Availability SLO alerts based on Google SRE multi-window multi-burn-rate methodology:
+    - Critical Burn Rate (14.4x): 2% budget consumed in 1h (long window: 1h, short window: 5m)
+    - Warning Burn Rate (6x): 5% budget consumed in 6h (long window: 6h, short window: 30m)
+  - Operational Alerts: High P95 Latency (>200ms read, >500ms write), High Outbox Lag (>60s), Outbox DLQ Growth, Database Pool Near Exhaustion (>85%), Redis Connection Errors, Application Readiness Failing
+- [x] Documentation (`docs/observability.md`):
+  - Complete architecture diagram, signal specifications, SLO math, and a 6-step incident debugging runbook (Symptom -> PromQL -> Grafana -> Tempo Trace -> Loki Logs -> DB Verification)
+
 ## Verified
 - `npm run typecheck`: 0 errors
-- `npm run lint`: 0 errors (28 warnings for explicit any)
+- `npm run lint`: 0 errors (36 warnings for explicit any)
 - `npm test`: 10 passed, 10 total (Crypto unit tests)
-- `npm run test:e2e`: 85 passed, 85 total
+- `npm run test:e2e`: 91 passed, 91 total
   - `test/auth.e2e-spec.ts`: 27 passed, 27 total
   - `test/booking.e2e-spec.ts`: 20 passed, 20 total
   - `test/phase3.e2e-spec.ts`: 19 passed, 19 total
   - `test/phase4.e2e-spec.ts`: 19 passed, 19 total
-- Total Test Suite: 95 passed, 95 total (100% passing)
+  - `test/observability.e2e-spec.ts`: 6 passed, 6 total
+- Total Test Suite: 101 passed, 101 total (100% passing across all 6 test suites)
 - `npm run audit:verify`: All 15 audit rows verified cryptographically, chain intact
 - `npm run openapi:export`: OpenAPI spec exported cleanly to `docs/openapi.yaml`
 
 ## Known gaps
-- Phase 5: Observability — OpenTelemetry traces, Prometheus RED metrics per route, queue depth and booking conflict counters, structured JSON logs with trace correlation, health/readiness endpoints, Grafana dashboard JSON, SLO burn-rate alert rules (99.95%).
+- Phase 6: CI, Infrastructure & Load Testing (Terraform for AWS, Multi-stage Docker, GitHub Actions workflows, k6 load testing scripts).
 
 ## Next
-Phase 5: Observability — OpenTelemetry instrumentation, Prometheus metrics exporter, RED metrics per route, queue depth and booking conflict counters, Grafana dashboard JSON, and alerting rules with multi-window multi-burn-rate SLO alerts.
+Phase 6: CI / Infrastructure / Load Testing — Multi-stage non-root Dockerfile, Terraform AWS infrastructure (VPC, RDS multi-AZ, ElastiCache, ECS Fargate, ALB), GitHub Actions CI/CD workflows (lint, typecheck, tests, coverage, Trivy, gitleaks), and k6 performance & concurrency stress test scripts.

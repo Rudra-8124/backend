@@ -2,6 +2,7 @@ import {
   Injectable,
   Inject,
   Logger,
+  Optional,
   BadRequestException,
   UnauthorizedException,
   NotFoundException,
@@ -14,6 +15,8 @@ import { CircuitBreaker } from './circuit-breaker';
 import { ConsultationStateMachine } from '../consultations/consultation-state-machine';
 import { ConsultationStatus } from '../consultations/entities/consultation.entity';
 import { PaymentStatus } from './entities/payment.entity';
+import { withActiveSpan } from '../common/observability/trace-context';
+import { MetricsService } from '../common/observability/metrics.service';
 
 @Injectable()
 export class PaymentsService {
@@ -26,6 +29,8 @@ export class PaymentsService {
     private readonly configService: ConfigService,
     @Inject(PAYMENT_PROVIDER)
     public readonly paymentProvider: IPaymentProvider,
+    @Optional()
+    private readonly metricsService?: MetricsService,
   ) {
     this.circuitBreaker = new CircuitBreaker({
       failureThreshold: 3,
@@ -62,14 +67,23 @@ export class PaymentsService {
     const consult = consultRows[0];
 
     // 2. Call provider through Circuit Breaker
-    const intentResult = await this.circuitBreaker.execute(() =>
-      this.paymentProvider.createIntent({
-        consultationId,
-        amountCents,
-        currency,
-        customerEmail,
-      }),
-    );
+    let intentResult;
+    try {
+      intentResult = await this.circuitBreaker.execute(() =>
+        this.paymentProvider.createIntent({
+          consultationId,
+          amountCents,
+          currency,
+          customerEmail,
+        }),
+      );
+      this.metricsService?.setCircuitBreakerState('mock_payment', this.circuitBreaker.getState());
+    } catch (err: unknown) {
+      this.metricsService?.setCircuitBreakerState('mock_payment', this.circuitBreaker.getState());
+      const errName = err instanceof Error ? err.name : 'error';
+      this.metricsService?.recordPaymentProviderError('mock_payment', errName);
+      throw err;
+    }
 
     // 3. Save payment record and update consultation
     await this.dataSource.transaction(async (manager) => {
@@ -274,10 +288,21 @@ export class PaymentsService {
                 [payment.id],
               );
             } else if (currentStatus === ConsultationStatus.PENDING_PAYMENT) {
-              await ConsultationStateMachine.transition(manager, payment.consultation_id, {
-                targetStatus: ConsultationStatus.CONFIRMED,
-                paymentIntentId,
-              });
+              await withActiveSpan(
+                'saga.confirm_consultation',
+                async () => {
+                  await ConsultationStateMachine.transition(manager, payment.consultation_id, {
+                    targetStatus: ConsultationStatus.CONFIRMED,
+                    paymentIntentId,
+                  });
+                },
+                {
+                  attributes: {
+                    'consultation.id': payment.consultation_id,
+                    'payment.intent_id': paymentIntentId,
+                  },
+                },
+              );
             }
           }
         }

@@ -25,6 +25,62 @@ services:
       timeout: 3s
       retries: 5
 
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.96.0
+    command: ['--config=/etc/otel-collector-config.yaml']
+    volumes:
+      - ./docker/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - '4317:4317' # OTLP gRPC
+      - '4318:4318' # OTLP HTTP
+      - '8889:8889' # Prometheus scrape metrics
+
+  tempo:
+    image: grafana/tempo:2.4.1
+    command: ['-config.file=/etc/tempo.yaml']
+    volumes:
+      - ./docker/tempo-config.yaml:/etc/tempo.yaml:ro
+      - tempodata:/var/tempo
+    ports:
+      - '3200:3200' # Tempo HTTP
+
+  loki:
+    image: grafana/loki:2.9.6
+    command: ['-config.file=/etc/loki/local-config.yaml']
+    volumes:
+      - ./docker/loki-config.yaml:/etc/loki/local-config.yaml:ro
+      - lokidata:/var/loki
+    ports:
+      - '3100:3100' # Loki HTTP
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yaml'
+      - '--storage.tsdb.path=/prometheus'
+    volumes:
+      - ./docker/prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - ./docker/prometheus-alerts.yaml:/etc/prometheus/prometheus-alerts.yaml:ro
+      - promdata:/prometheus
+    ports:
+      - '9090:9090'
+
+  grafana:
+    image: grafana/grafana:10.4.1
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=amrutam_admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/etc/grafana/dashboards:ro
+    ports:
+      - '3001:3000'
+    depends_on:
+      - prometheus
+      - tempo
+      - loki
+
   api:
     build:
       context: .
@@ -36,11 +92,14 @@ services:
       NODE_ENV: development
       DB_HOST: postgres
       REDIS_HOST: redis
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      otel-collector:
+        condition: service_started
     healthcheck:
       test: ['CMD-SHELL', 'wget -qO- http://localhost:3000/healthz || exit 1']
       interval: 10s
@@ -58,11 +117,17 @@ services:
       NODE_ENV: development
       DB_HOST: postgres
       REDIS_HOST: redis
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318/v1/traces
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      otel-collector:
+        condition: service_started
 
 volumes:
   pgdata:
+  tempodata:
+  lokidata:
+  promdata:

@@ -4,15 +4,21 @@ import {
   ExecutionContext,
   CallHandler,
   BadRequestException,
+  Optional,
 } from '@nestjs/common';
 import { Observable, of } from 'rxjs';
 import { tap, catchError } from 'rxjs/operators';
 import { FastifyReply, FastifyRequest } from 'fastify';
 import { IdempotencyService } from './idempotency.service';
+import { MetricsService } from '../common/observability/metrics.service';
 
 @Injectable()
 export class IdempotencyInterceptor implements NestInterceptor {
-  constructor(private readonly idempotencyService: IdempotencyService) {}
+  constructor(
+    private readonly idempotencyService: IdempotencyService,
+    @Optional()
+    private readonly metricsService?: MetricsService,
+  ) {}
 
   async intercept(context: ExecutionContext, next: CallHandler): Promise<Observable<unknown>> {
     const http = context.switchToHttp();
@@ -48,6 +54,7 @@ export class IdempotencyInterceptor implements NestInterceptor {
     });
 
     if (claim.status === 'COMPLETED') {
+      this.metricsService?.recordIdempotencyReplay();
       void reply
         .status(claim.responseStatus || 200)
         .header('idempotency-replay', 'true')

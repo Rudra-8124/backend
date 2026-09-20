@@ -19,6 +19,16 @@ paths:
         "200":
           description: ""
       tags: *a1
+  /metrics:
+    get:
+      operationId: MetricsController_getMetrics
+      summary: Prometheus metrics scrape endpoint
+      parameters: []
+      responses:
+        "200":
+          description: Prometheus plain text exposition format
+      tags:
+        - Observability
   /auth/register:
     post:
       operationId: AuthController_register
@@ -307,6 +317,12 @@ paths:
       summary: Book a consultation slot (Patient only, atomic conditional hold +
         outbox event)
       parameters:
+        - name: traceparent
+          required: false
+          in: header
+          description: W3C distributed trace context parent header
+          schema:
+            type: string
         - name: Idempotency-Key
           in: header
           description: Unique idempotency key for state-changing request
