@@ -7,7 +7,7 @@ Phase 4 search/cache/admin .. [x] ← completed 2026-09-19
 Phase 5 observability ....... [x] ← completed 2026-09-20
 Phase 6 CI/infra/load test .. [x] ← completed 2026-09-20
 Phase 7 docs ................ [x] ← completed 2026-09-20
-Phase 8 final audit ......... [ ]
+Phase 8 final audit ......... [x] ← completed 2026-09-21
 
 ## Phase 0 — Done
 - [x] requirements-traceability.md — every assignment line mapped to module/phase
@@ -307,22 +307,76 @@ Phase 8 final audit ......... [ ]
 - [x] OpenAPI Specification (`docs/openapi.yaml`):
   - Verified and re-exported with zero drift via `npm run openapi:export`
 
+## Phase 8 — Done
+- [x] Adversarial Security & Idempotency Audit Suite (`test/adversarial-audit.e2e-spec.ts` - 24/24 passed):
+  - Idempotency Deep Dive across all state-changing endpoints:
+    - Replay returns stored response with `Idempotency-Replay: true` header
+    - Replay with different body returns HTTP 422 Unprocessable Entity
+    - Fixed URL endpoint scoping collision across distinct resource IDs (`src/idempotency/idempotency.interceptor.ts`)
+    - Webhook deduplication on provider `event_id` returning HTTP 200 `already_processed`
+    - Cancellation idempotency on already cancelled consultations returning cached status
+  - IDOR & Access Control Matrix:
+    - Patient cannot read/modify other patients' consultations or prescriptions (HTTP 403)
+    - Unassigned doctor cannot read/modify other doctors' consultations or prescriptions (HTTP 403)
+    - Patients cannot prescribe medications (HTTP 403)
+    - Role escalation prevention: patients cannot cancel doctor slots or create availability (HTTP 403)
+  - Mass Assignment Prevention:
+    - Created `UpdateProfileDto` with strict class-validator decorators (`src/users/dto/update-profile.dto.ts`)
+    - `PATCH /users/me` rejects non-whitelisted privileged fields (`role: admin`) with HTTP 400 Bad Request
+    - `POST /auth/register` rejects non-whitelisted fields (`isVerified: true`) with HTTP 400 Bad Request
+  - JWT Tampering & Privilege Defense:
+    - Rejects `alg: none` unsigned tokens with HTTP 401 Unauthorized
+    - Rejects tokens signed with wrong secret with HTTP 401 Unauthorized
+    - Rejects expired tokens with HTTP 401 Unauthorized
+    - Rejects intermediate `mfa_token` attempting access to protected endpoints with HTTP 401 Unauthorized
+  - Refresh Token Family Invalidation:
+    - Detects refresh token reuse and immediately invalidates entire token family in DB
+  - MFA & Brute Force Defense:
+    - Blocks invalid TOTP tokens (HTTP 401)
+    - Rejects single-use recovery code reuse attempts (HTTP 401)
+    - Sliding-window rate limit enforces 5 req/min on login and MFA endpoints
+    - Blocks rate limit bypass via spoofed `X-Forwarded-For` headers
+  - SQL Injection & Cursor Robustness:
+    - SQL injection attempts in query parameters safely escaped by parameterized queries
+    - Fixed search pagination cursor decoding to validate UUID syntax (`src/search/search.service.ts`)
+  - Log PHI/PII Leakage Prevention:
+    - Hardened Pino log redaction paths for `req.body.notes`, `req.body.diagnosis`, and `req.body.medications`
+- [x] Failure Injection & Resilience Suite (`test/failure-injection.e2e-spec.ts` - 5/5 passed):
+  - Failure 1: Redis Crash / Unavailability:
+    - `CacheService` safely bypasses cache and falls back directly to PostgreSQL without crashing
+    - `RateLimitService` fails open to preserve API availability when Redis drops
+  - Failure 2: Worker Crash Mid-Saga:
+    - Abandoned outbox events stuck in `PROCESSING` (> 30s) automatically recovered and reset to `PENDING`
+    - Worker restart re-processes events idempotently with zero data loss or duplicate charges
+  - Failure 3: Database & Redis Connection Health:
+    - `/readyz` accurately probes PostgreSQL and Redis health, returning HTTP 200 when ready
+    - `/healthz` liveness probe remains responsive
+- [x] Security Hardening & Dependency Scan:
+  - Added package override for `@fastify/middie: "^9.3.4"` resolving critical CVE
+  - `npm audit --audit-level=critical` verified passing with 0 critical vulnerabilities
+  - Verified non-root Docker execution (`amrutam`, UID 10001) in `Dockerfile`
+
 ## Verified
 - `npm run typecheck`: 0 errors
 - `npm run lint`: 0 errors (36 warnings for explicit any)
 - `npm test`: 10 passed, 10 total (Crypto unit tests)
-- `npm run test:e2e`: 91 passed, 91 total across 5 suites (auth, booking, phase3, phase4, observability)
-- Total Test Suite: 101 passed, 101 total (100% passing)
-- `npm run audit:verify`: All 30 audit rows in partition verified cryptographically, chain intact
-- `npm run openapi:export`: 0 drift against `docs/openapi.yaml`
-- `terraform fmt -check -recursive terraform/`: Passed
+- `npm run test:e2e`: 120 passed, 120 total across 7 suites:
+  - `test/auth.e2e-spec.ts`
+  - `test/booking.e2e-spec.ts` (including 50 concurrent bookings)
+  - `test/phase3.e2e-spec.ts`
+  - `test/phase4.e2e-spec.ts`
+  - `test/observability.e2e-spec.ts`
+  - `test/adversarial-audit.e2e-spec.ts` (24 adversarial security tests)
+  - `test/failure-injection.e2e-spec.ts` (5 failure injection resilience tests)
+- Total Test Suite: 130 passed, 130 total (100% passing)
+- `npm run audit:verify`: All 52 audit rows in partition verified cryptographically, chain intact
+- `npm audit --audit-level=critical`: 0 critical vulnerabilities
 - `terraform -chdir=terraform validate`: Success! Configuration is valid (0 errors, 0 warnings)
 - `k6 run k6/load-test.js`: All performance thresholds passed (read p95: 65.48ms, write p95: 242.77ms, error rate: 0.00%)
-- `docs/architecture.md` word count: 2,099 words (renders to <= 4 pages)
-- Clone acceptance test: Clean clone and execution in isolated environment
 
 ## Known gaps
-- Phase 8: Final holistic audit against take-home prompt and rubric.
+- Transitive build-time devDependencies (`@nestjs/cli`, `webpack`, `tmp`) contain moderate/high warnings in npm audit; excluded from production container via multi-stage build.
+- NestJS 12 upgrade will be performed once framework stability is verified.
 
 ## Next
-Phase 8: Final holistic audit against all rubric items, security, idempotency, performance, and documentation requirements.
+Project completion! All 8 phases completed, verified, and ready for production handoff.

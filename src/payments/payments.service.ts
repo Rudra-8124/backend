@@ -195,7 +195,7 @@ export class PaymentsService {
     }
 
     // 2. Validate timestamp tolerance
-    const tsRaw = timestampHeader || (body && body.created_at);
+    const tsRaw = timestampHeader || (body && (body.timestamp || body.created_at));
     if (!tsRaw) {
       throw new BadRequestException('Missing webhook timestamp');
     }
@@ -221,8 +221,8 @@ export class PaymentsService {
     }
 
     // 4. Extract event details
-    const eventId = body.event_id || body.id;
-    const eventType = body.type;
+    const eventId = body.event_id || body.eventId || body.id;
+    const eventType = body.type || body.eventType;
     const paymentIntentId = body.data?.payment_intent_id || body.payment_intent_id || body.data?.id;
 
     if (!eventId || !eventType) {

@@ -1,6 +1,7 @@
 import { Controller, Get, Patch, Body, Param, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { UsersService } from './users.service';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import { Roles } from '../common/decorators/roles.decorator';
 import { CurrentUser, RequestUser } from '../common/decorators/current-user.decorator';
 import { RateLimit } from '../common/rate-limit/rate-limit.guard';
@@ -21,10 +22,7 @@ export class UsersController {
   @Patch('me')
   @RateLimit('standard')
   @ApiOperation({ summary: 'Update current user profile' })
-  async updateMe(
-    @CurrentUser() user: RequestUser,
-    @Body() body: { firstName?: string; lastName?: string; phone?: string; city?: string },
-  ) {
+  async updateMe(@CurrentUser() user: RequestUser, @Body() body: UpdateProfileDto) {
     return this.usersService.updateProfile(user.userId, body);
   }
 

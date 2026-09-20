@@ -36,10 +36,11 @@ export class PaymentsController {
     @Headers('x-webhook-signature') sigHeader?: string,
     @Headers('x-signature') altSigHeader?: string,
     @Headers('x-timestamp') tsHeader?: string,
+    @Headers('x-webhook-timestamp') webhookTsHeader?: string,
   ) {
     const rawBody = req.rawBody ? req.rawBody.toString('utf-8') : JSON.stringify(body);
     const signature = sigHeader || altSigHeader || (body && body.signature);
-    const timestamp = tsHeader || (body && body.created_at);
+    const timestamp = tsHeader || webhookTsHeader || (body && (body.timestamp || body.created_at));
 
     return this.paymentsService.processWebhook(rawBody, body, signature, timestamp);
   }

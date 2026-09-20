@@ -102,3 +102,22 @@ To maintain architectural transparency, the following items are intentionally om
 3. **WebRTC Media Stream Infrastructure**: The backend orchestrates consultation scheduling, state transitions, billing, and prescriptions. Real-time video/audio media transmission (e.g., via Agora, LiveKit, or Twilio) is not implemented.
 4. **SMS/Email Gateway Delivery**: Two-factor authentication (TOTP) and audit logging are fully implemented; external transactional email (SES) and SMS delivery (Twilio) are logged via structured events rather than sending actual SMS/emails.
 5. **Multi-Region Active-Active PostgreSQL**: The database architecture uses multi-AZ primary/standby failover (< 2 min RTO) and cross-region backup replication. Active-active multi-region database replication (e.g., CockroachDB or Aurora Global) was not implemented due to complexity and cost.
+
+---
+
+## 6. Phase 8 Adversarial Audit Findings & Remediations
+
+During the adversarial audit in Phase 8, the following potential vulnerabilities and edge cases were discovered, remediated, and covered with automated regression tests:
+
+| Finding ID | Severity | Vector | Remediation | Proving Test |
+| :--- | :--- | :--- | :--- | :--- |
+| **SEC-01** | **Critical** | CVE in `@fastify/middie` <=9.3.1 allowed middleware bypass. | Added `@fastify/middie: "^9.3.4"` to `package.json` overrides. | `npm audit --audit-level=critical` (exited 0) |
+| **IDEMP-01** | **High** | Route template scoping (`/:id`) in Idempotency Interceptor caused false replay collision across distinct resources. | Scoped idempotency key endpoint to actual HTTP path `${method}:${url.split('?')[0]}`. | `test/adversarial-audit.e2e-spec.ts` |
+| **SEC-02** | **High** | Mass assignment bypass on `PATCH /users/me` due to inline TypeScript type bypassing `ValidationPipe`. | Implemented `UpdateProfileDto` with strict class-validator decorators. | `test/adversarial-audit.e2e-spec.ts` |
+| **SEC-03** | **Medium** | Malformed Base64 cursor with non-UUID string threw unhandled 500 PostgreSQL cast error. | Added strict UUID regex validation before cursor query parameter assignment. | `test/adversarial-audit.e2e-spec.ts` |
+| **RESIL-01** | **Medium** | Uncaught Redis network error in `RateLimitService.consume` could fail requests if Redis is unreachable. | Implemented fail-open fallback in `RateLimitService` to preserve service availability. | `test/failure-injection.e2e-spec.ts` |
+
+### Residual Informational Notes
+- **Ecosystem Build-Time Dependencies**: Certain devDependencies (`@nestjs/cli`, `webpack`, `tmp`) report moderate/high warnings in `npm audit`. These are dev-only packages omitted from the production container build via multi-stage `npm ci --omit=dev`.
+- **Framework Upgrades**: Upstream `fastify` and `lodash` warnings are pinned to NestJS 11 ecosystem; upgrade to NestJS 12 is scheduled in roadmap.
+

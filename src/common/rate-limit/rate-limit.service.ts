@@ -23,47 +23,56 @@ export class RateLimitService {
    * @param windowSeconds - window size in seconds
    */
   async consume(key: string, maxRequests: number, windowSeconds: number): Promise<RateLimitResult> {
-    const now = Date.now();
-    const windowStart = now - windowSeconds * 1000;
-    const redisKey = `rl:${key}`;
+    try {
+      const now = Date.now();
+      const windowStart = now - windowSeconds * 1000;
+      const redisKey = `rl:${key}`;
 
-    // Use a pipeline for atomicity
-    const pipeline = this.redis.pipeline();
-    // Remove entries outside the window
-    pipeline.zremrangebyscore(redisKey, 0, windowStart);
-    // Count current entries
-    pipeline.zcard(redisKey);
-    // Add current request
-    pipeline.zadd(redisKey, now, `${now}:${Math.random()}`);
-    // Set TTL
-    pipeline.expire(redisKey, windowSeconds);
+      // Use a pipeline for atomicity
+      const pipeline = this.redis.pipeline();
+      // Remove entries outside the window
+      pipeline.zremrangebyscore(redisKey, 0, windowStart);
+      // Count current entries
+      pipeline.zcard(redisKey);
+      // Add current request
+      pipeline.zadd(redisKey, now, `${now}:${Math.random()}`);
+      // Set TTL
+      pipeline.expire(redisKey, windowSeconds);
 
-    const results = await pipeline.exec();
-    if (!results) {
-      return { allowed: true, remaining: maxRequests - 1, retryAfterSeconds: 0 };
-    }
+      const results = await pipeline.exec();
+      if (!results) {
+        return { allowed: true, remaining: maxRequests - 1, retryAfterSeconds: 0 };
+      }
 
-    const currentCount = (results[1][1] as number) || 0;
+      const currentCount = (results[1][1] as number) || 0;
 
-    if (currentCount >= maxRequests) {
-      // Over limit — remove the entry we just added
-      // (it was added optimistically in the pipeline)
-      // Get the oldest entry to calculate retry-after
-      const oldest = await this.redis.zrange(redisKey, 0, 0, 'WITHSCORES');
-      const oldestTs = oldest.length >= 2 ? parseInt(oldest[1], 10) : now;
-      const retryAfter = Math.ceil((oldestTs + windowSeconds * 1000 - now) / 1000);
+      if (currentCount >= maxRequests) {
+        // Over limit — remove the entry we just added
+        // (it was added optimistically in the pipeline)
+        // Get the oldest entry to calculate retry-after
+        const oldest = await this.redis.zrange(redisKey, 0, 0, 'WITHSCORES');
+        const oldestTs = oldest.length >= 2 ? parseInt(oldest[1], 10) : now;
+        const retryAfter = Math.ceil((oldestTs + windowSeconds * 1000 - now) / 1000);
+
+        return {
+          allowed: false,
+          remaining: 0,
+          retryAfterSeconds: Math.max(retryAfter, 1),
+        };
+      }
 
       return {
-        allowed: false,
-        remaining: 0,
-        retryAfterSeconds: Math.max(retryAfter, 1),
+        allowed: true,
+        remaining: maxRequests - currentCount - 1,
+        retryAfterSeconds: 0,
+      };
+    } catch {
+      // If Redis is unavailable, fail-open to ensure service continuity
+      return {
+        allowed: true,
+        remaining: maxRequests - 1,
+        retryAfterSeconds: 0,
       };
     }
-
-    return {
-      allowed: true,
-      remaining: maxRequests - currentCount - 1,
-      retryAfterSeconds: 0,
-    };
   }
 }

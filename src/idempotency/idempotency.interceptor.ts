@@ -43,7 +43,8 @@ export class IdempotencyInterceptor implements NestInterceptor {
     const user = (request as unknown as Record<string, unknown>).user as
       { userId?: string } | undefined;
     const userId = user?.userId || request.ip || 'anonymous';
-    const endpoint = `${method}:${(request.routeOptions?.url || request.url).split('?')[0]}`;
+    const rawUrl = (request.url || '').split('?')[0];
+    const endpoint = `${method}:${rawUrl}`;
     const requestHash = this.idempotencyService.hashPayload(request.body);
 
     const claim = await this.idempotencyService.claimKey({

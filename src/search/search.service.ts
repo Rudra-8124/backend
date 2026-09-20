@@ -156,7 +156,14 @@ export class SearchService {
       }
     }
 
-    if (decodedCursor && decodedCursor.id && decodedCursor.sortValue !== undefined) {
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    if (
+      decodedCursor &&
+      decodedCursor.id &&
+      UUID_REGEX.test(decodedCursor.id) &&
+      decodedCursor.sortValue !== undefined
+    ) {
       params.push(decodedCursor.sortValue);
       const valIdx = params.length;
       params.push(decodedCursor.id);

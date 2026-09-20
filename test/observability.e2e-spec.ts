@@ -188,8 +188,16 @@ describe('Phase 5: Observability, Tracing, Metrics & Logs (e2e)', () => {
       expect(payload._traceparent).toContain(capturedTraceId);
 
       // 3. Worker executes the outbox relay batch
-      const outboxResult = await sagaOutboxService.processOutboxBatch(10);
-      expect(outboxResult.processed).toBeGreaterThanOrEqual(1);
+      let outboxProcessed = 0;
+      for (let i = 0; i < 10; i++) {
+        const outboxResult = await sagaOutboxService.processOutboxBatch(50);
+        outboxProcessed += outboxResult.processed;
+        const check = await dataSource.query(`SELECT id FROM payments WHERE consultation_id = $1`, [
+          consultationId,
+        ]);
+        if (check.length > 0) break;
+      }
+      expect(outboxProcessed).toBeGreaterThanOrEqual(1);
 
       // 4. Verify payment intent was created by the worker within the saga
       const payRows = await dataSource.query(

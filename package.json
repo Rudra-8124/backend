@@ -24,6 +24,9 @@
     "seed:k6": "ts-node -r tsconfig-paths/register k6/seed-k6.ts",
     "test:load": "k6 run k6/load-test.js"
   },
+  "overrides": {
+    "@fastify/middie": "^9.3.4"
+  },
   "dependencies": {
     "@fastify/cors": "^9.0.1",
     "@fastify/helmet": "^11.1.1",

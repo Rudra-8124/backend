@@ -145,6 +145,12 @@ paths:
       operationId: UsersController_updateMe
       summary: Update current user profile
       parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateProfileDto"
       responses:
         "200":
           description: ""
@@ -478,6 +484,11 @@ paths:
           schema:
             type: string
         - name: x-timestamp
+          required: true
+          in: header
+          schema:
+            type: string
+        - name: x-webhook-timestamp
           required: true
           in: header
           schema:
@@ -949,6 +960,17 @@ components:
           type: string
       required:
         - refreshToken
+    UpdateProfileDto:
+      type: object
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        phone:
+          type: string
+        city:
+          type: string
     UpdateDoctorProfileDto:
       type: object
       properties:
