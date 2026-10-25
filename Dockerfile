@@ -1,5 +1,5 @@
 # ── Build stage ──────────────────────────────────────
-FROM node:22.14.0-alpine3.21 AS builder
+FROM node:25.2.1-alpine3.21 AS builder
 
 WORKDIR /app
 
@@ -22,7 +22,7 @@ COPY seeds/ ./seeds/
 RUN npm run build
 
 # ── Production dependencies stage ────────────────────
-FROM node:22.14.0-alpine3.21 AS production-deps
+FROM node:25.2.1-alpine3.21 AS production-deps
 
 WORKDIR /app
 
@@ -31,7 +31,7 @@ COPY package*.json ./
 RUN npm ci --omit=dev --ignore-scripts
 
 # ── Production runtime stage ─────────────────────────
-FROM node:22.14.0-alpine3.21 AS production
+FROM node:25.2.1-alpine3.21 AS production
 
 # Install dumb-init for proper PID 1 signal forwarding (SIGINT/SIGTERM)
 # Install wget for container health checks
